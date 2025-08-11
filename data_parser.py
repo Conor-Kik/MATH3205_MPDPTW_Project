@@ -1,48 +1,29 @@
 # ==========================
 # MPDTW parser
 # ==========================
+from pathlib import Path
 
-def _basename(path):
-    p = path.replace("\\", "/")
-    return p.split("/")[-1]
+# ── Sets and parameters (conceptual) ───────────────────────────────────────────
+# V = P ∪ D ∪ {0} : all vertices; node 0 is the depot (source/sink).
+# G = (V, A)      : directed graph on V with arc set A (here: complete without self-loops).
+# P = {1,…,p}     : pickup nodes (customer vertices of type 0).
+# D = {p+1,…,p+n} : delivery nodes (customer vertices of type 1); typically |D| = n and |P| ≥ n.
+# N = P ∪ D       : set of customer nodes (all non-depot vertices).
+# R = {r1,…,rn}   : requests to route. Each request r has:
+#                   Pr ⊆ P (its pickup nodes) and Dr ⊆ D (its delivery nodes; often |Dr|=1).
+#
+# Data (parameters):
+# K    : number of vehicles (homogeneous fleet).
+# Q    : capacity of each vehicle.
+# e_j  : opening time of the time window at node j ∈ V.
+# l_j  : closing time of the time window at node j ∈ V.
+# d_j  : service time at node j ∈ V.
+# q_j  : demand at node j ∈ V (positive for pickup, negative for delivery).
+# t_ij : travel time from i to j for (i, j) ∈ A.
+# c_ij : travel cost from i to j for (i, j) ∈ A (here c_ij = t_ij).
 
-def _strip_ext(name):
-    dot = name.rfind(".")
-    return name[:dot] if dot != -1 else name
 
-def _parse_meta_from_name(path_or_name):
-    """
-    Parse names like: l_4_25_1.txt  -> {'tw_type': 'Large', 'max_request_len': 4, 'num_customers': 25, 'index': 1}
-    Returns None if it doesn't match the convention.
-    """
-    name = _strip_ext(_basename(path_or_name)).lower()
-    parts = name.split("_")
-    if len(parts) < 3:
-        return None
-    tw_key = parts[0]
-    if tw_key not in ("l", "n", "w"):
-        return None
-    tw_map = {"l": "Large", "n": "Normal", "w": "Without"}
-    # parse ints safely
-    try:
-        max_req_len = int(parts[1])
-        num_customers = int(parts[2])
-    except:
-        return None
-    idx = None
-    if len(parts) >= 4:
-        try:
-            idx = int(parts[3])
-        except:
-            idx = None
-    return {
-        "tw_type": tw_map[tw_key],
-        "max_request_len": max_req_len,
-        "num_customers": num_customers,
-        "index": idx,
-    }
-
-# --------- line parsers ---------
+# ── Line parsers ───────────────────────────────────────────────────────────────
 def _parse_header(line):
     parts = line.strip().split()
     if len(parts) < 2:
@@ -62,102 +43,91 @@ def _parse_node(line):
         "tw_start": int(parts[4]),
         "tw_end": int(parts[5]),
         "service": int(parts[6]),
-        "node_type": int(parts[7]),   # 0=pickup, 1=delivery
-        "request_id": int(parts[8]),
+        "node_type": int(parts[7]),   # 0=pickup ∈ P, 1=delivery ∈ D
+        "request_id": int(parts[8]),  # -1 only for depot line
     }
 
-# --------- core parser ---------
+
+# ── Core parser: text → internal instance ─────────────────────────────────────
 def parse_instance_text(text, name="instance"):
     """
-    Parse an MPDTW instance from a text string (no imports).
-    Returns a pure-Python dict with internal node indices:
-      - depot = 0, customers = 1..n
-    Keys:
-      vehicles, capacity, depot
-      V, C, P, D, R (rid -> {pickups:[...], deliveries:[...]})
-      coords, demand, tw_a, tw_b, service, node_type, raw_id
-      meta (None here; set in parse_instance_file)
+    Returns a dict organized with internal indices:
+      depot = 0, customers = 1..m (so V = {0} ∪ N and N = P ∪ D).
+      Fields provided match the sets/parameters used in build_milp_data.
     """
-    # strip comments/empties
+    # Remove empty/comment lines
     lines = []
     for ln in text.splitlines():
         s = ln.strip()
         if s and not s.startswith("#"):
             lines.append(s)
-
     if not lines:
         raise ValueError("Empty instance text")
 
+    # First line → K, Q
     vehicles, capacity = _parse_header(lines[0])
     if len(lines) < 2:
         raise ValueError("Missing depot line (second line)")
 
-    # depot must be the second line with request_id = -1
+    # Second line must be the depot (request_id = -1)
     depot_node = _parse_node(lines[1])
     if depot_node["request_id"] != -1:
         raise ValueError("Second line must be the depot (request_id = -1)")
 
-    # parse ONLY customer lines (skip header + depot)
-    raw_nodes = []
-    for k in range(2, len(lines)):
-        raw_nodes.append(_parse_node(lines[k]))
+    # Remaining lines → customer nodes (compose N = P ∪ D, with P from node_type==0, D from node_type==1)
+    raw_nodes = [_parse_node(x) for x in lines[2:]]
 
-    # internal indices: 0 = depot, 1..n = customers
-    V = [0]
+    # Internal indices: 0 = depot, 1..m = customers
+    V = [0]                         # V = {0} ∪ N
     coords = {0: (depot_node["x"], depot_node["y"])}
-    demand = {0: depot_node["demand"]}
-    tw_a = {0: depot_node["tw_start"]}
-    tw_b = {0: depot_node["tw_end"]}
-    service = {0: depot_node["service"]}
-    node_type = {0: -1}  # depot marker
+    demand = {0: depot_node["demand"]}         # q_0
+    tw_a   = {0: depot_node["tw_start"]}       # e_0
+    tw_b   = {0: depot_node["tw_end"]}         # l_0
+    service= {0: depot_node["service"]}        # d_0
+    node_type = {0: -1}                        # depot marker
     raw_id = {0: depot_node["raw_id"]}
     depot = 0
 
-    C, P, D = [], [], []
-    R = {}  # rid -> {"pickups":[...], "deliveries":[...]}
+    C, P, D = [], [], []             # N, P, D (with N = P ∪ D)
+    R = {}                           # rid → {"pickups": Pr, "deliveries": Dr}
 
-    idx = 1
-    for n in raw_nodes:
-        i = idx
-        idx += 1
-        V.append(i)
-        C.append(i)
-        coords[i] = (n["x"], n["y"])
-        demand[i] = n["demand"]
-        tw_a[i] = n["tw_start"]
-        tw_b[i] = n["tw_end"]
-        service[i] = n["service"]
-        node_type[i] = n["node_type"]
-        raw_id[i] = n["raw_id"]
+    for i, n in enumerate(raw_nodes, start=1):
+        V.append(i); C.append(i)     # add to V and N
+        coords[i]   = (n["x"], n["y"])
+        demand[i]   = n["demand"]    # q_i (positive for pickup, negative for delivery, as given)
+        tw_a[i]     = n["tw_start"]  # e_i
+        tw_b[i]     = n["tw_end"]    # l_i
+        service[i]  = n["service"]   # d_i
+        node_type[i]= n["node_type"]
+        raw_id[i]   = n["raw_id"]
 
         rid = n["request_id"]
         if rid < 0:
             raise ValueError("Non-depot node with negative request_id")
 
+        # Build Pr and Dr for each request r ∈ R
         if rid not in R:
             R[rid] = {"pickups": [], "deliveries": []}
 
         if n["node_type"] == 0:
-            P.append(i)
-            R[rid]["pickups"].append(i)
+            P.append(i); R[rid]["pickups"].append(i)     # i ∈ P, i ∈ Pr
         elif n["node_type"] == 1:
-            D.append(i)
-            R[rid]["deliveries"].append(i)
+            D.append(i); R[rid]["deliveries"].append(i)  # i ∈ D, i ∈ Dr (often singleton)
         else:
             raise ValueError("node_type must be 0 (pickup) or 1 (delivery)")
 
     return {
-        "name": _strip_ext(_basename(name)),
+        "name": Path(name).stem,
         "vehicles": vehicles,     # K
         "capacity": capacity,     # Q
         "depot": depot,           # 0
-        "V": V,                   # {0} ∪ P ∪ D
+        "V": V,                   # {0} ∪ N
         "C": C,                   # N = P ∪ D
         "P": P,
         "D": D,
-        "R": R,                   # rid -> {"pickups":[...], "deliveries":[...]}
-        "coords": coords,         # i -> (x,y)
-        "demand": demand,         # q_i (signed)
+        "R": R,                   # r ↦ (Pr, Dr)
+        "coords": coords,         # i ↦ (x_i, y_i)
+        "demand": demand,         # q_i
         "tw_a": tw_a,             # e_i
         "tw_b": tw_b,             # l_i
         "service": service,       # d_i
@@ -168,76 +138,59 @@ def parse_instance_text(text, name="instance"):
 
 def parse_instance_file(filename):
     """
-    Read from the fixed subdirectory: mpdtw_instances_2019/<filename>
-    Example: inst = parse_instance_file("l_4_25_1.txt")
+    If filename has no path separators, reads from 'mpdtw_instances_2019/<filename>'.
     """
-    # if caller already passed a path with a slash, respect it; else prepend subdir
     if ("/" in filename) or ("\\" in filename):
         path = filename
     else:
-        path = "mpdtw_instances_2019/" + filename
-
+        path = f"mpdtw_instances_2019/{filename}"
     with open(path, "r", encoding="utf-8") as f:
         text = f.read()
-    inst = parse_instance_text(text, name=filename)
-    inst["meta"] = _parse_meta_from_name(filename)
-    return inst
+    return parse_instance_text(text, name=filename)
 
-# --------- MILP builder: sets A and matrices t,c ---------
+
+# ── MILP builder: create (V,P,D,N,A,R,Pr,Dr) and (K,Q,e,l,d,q,t,c) ───────────
 def _euclid(p, q):
-    # Euclidean distance (float) without imports
     dx = p[0] - q[0]
     dy = p[1] - q[1]
     return (dx*dx + dy*dy) ** 0.5
 
-def build_milp_data(filename, include_self_loops=False, cost_equals_time=True, speed=1.0):
+def build_milp_data(filename, cost_equals_time=True, speed=1.0):
     """
-    From a parsed 'inst', produce an MPDPTW data dict aligned to your math:
-      - Sets: V, P, D, N, A, R, Pr, Dr
-      - Params: K, Q, e, l, d, q, t, c (with c == t by default)
-    Distances are Euclidean; travel time = distance / speed.
+    Returns a dictionary with:
+      Sets : V, P, D, N, A, R, Pr, Dr
+      Data : K, Q, e, l, d, q, t, c  (with c == t by default)
+    Travel time uses Euclidean distance / speed; cost equals time unless overridden.
     """
     inst = parse_instance_file(filename)
-    V = inst["V"]
-    P = inst["P"]
-    D = inst["D"]
-    N = inst["C"]
-    K = inst["vehicles"]
-    Q = inst["capacity"]
 
+    # Sets
+    V = inst["V"]                 # V = {0} ∪ N
+    P = inst["P"]                 # P ⊆ V\{0}
+    D = inst["D"]                 # D ⊆ V\{0}
+    N = inst["C"]                 # N = P ∪ D
+    R = list(inst["R"].keys())    # R = {r1,…,rn}
+    Pr = {r: list(inst["R"][r]["pickups"])    for r in R}   # Pr ⊆ P for each r
+    Dr = {r: list(inst["R"][r]["deliveries"]) for r in R}   # Dr ⊆ D for each r (often |Dr|=1)
+    # A: complete digraph on V without self-loops
+    A = [(i, j) for i in V for j in V if i != j]
+
+    # Data (parameters)
+    K = inst["vehicles"]          # number of vehicles
+    Q = inst["capacity"]          # capacity per vehicle
+    e = inst["tw_a"]              # e_j
+    l = inst["tw_b"]              # l_j
+    d = inst["service"]           # d_j
+    q = inst["demand"]            # q_j
     coords = inst["coords"]
-    e = inst["tw_a"]
-    l = inst["tw_b"]
-    d = inst["service"]
-    q = inst["demand"]
 
-    # Requests (keep general: possibly multiple pickups/deliveries)
-    R = []
-    Pr = {}
-    Dr = {}
-    for rid in inst["R"]:
-        R.append(rid)
-        Pr[rid] = list(inst["R"][rid]["pickups"])
-        Dr[rid] = list(inst["R"][rid]["deliveries"])
-
-    # Arc set A: complete digraph (toggle self-loops as needed)
-    A = []
-    for i in V:
-        for j in V:
-            if include_self_loops or (i != j):
-                A.append((i, j))
-
-    # Travel time and cost
-    t = {}
-    c = {}
+    # Travel time t_ij and cost c_ij (here c_ij = t_ij)
+    t, c = {}, {}
     for (i, j) in A:
-        if i == j:
-            tij = 0.0
-        else:
-            dist = _euclid(coords[i], coords[j])
-            tij = dist / speed
+        dist = _euclid(coords[i], coords[j])
+        tij = dist / speed
         t[(i, j)] = tij
-        c[(i, j)] = tij if cost_equals_time else tij  # easy hook to change cost later
+        c[(i, j)] = tij if cost_equals_time else tij  # customize here if cost ≠ time
 
     return {
         # sets
@@ -258,7 +211,7 @@ def build_milp_data(filename, include_self_loops=False, cost_equals_time=True, s
 
 # --------- Example  ---------
 if __name__ == "__main__":
-    milp = build_milp_data("l_4_25_1.txt")
+    milp = build_milp_data("w_8_100_4.txt")
 
     print(f"Instance: {milp['name']}")
     print(f"Total requests: {len(milp['R'])}")
