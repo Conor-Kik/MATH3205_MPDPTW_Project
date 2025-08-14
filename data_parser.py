@@ -173,7 +173,7 @@ def build_milp_data(filename, cost_equals_time=True, speed=1.0):
     Pr = {r: list(inst["R"][r]["pickups"])    for r in R}   # Pr ⊆ P for each r
     Dr = {r: list(inst["R"][r]["deliveries"]) for r in R}   # Dr ⊆ D for each r (often |Dr|=1)
     # A: complete digraph on V without self-loops
-    A = [(i, j) for i in V for j in V if i != j]
+    A = [(i, j) for i in V for j in V]
 
     # Data (parameters)
     K = inst["vehicles"]          # number of vehicles
