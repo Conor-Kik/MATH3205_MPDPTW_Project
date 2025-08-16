@@ -164,8 +164,8 @@ model.setObjective(quicksum(X[i, j] * c[i, j] for i in V for j in V))
 
 model.optimize()
 
+#---------WARM START-----------
 if model.status == GRB.OPTIMAL and model.SolCount > 0:
-    # --- cache incumbent from the first run for warm-starting
     x_start  = {k: 
                 var.X 
                 for k, var in X.items()}
@@ -243,5 +243,7 @@ if model.status == GRB.OPTIMAL and model.SolCount > 0:
         print_solution_summary(
             model, V, N, R, K, Pr, Dr, X, S, C, e, l, q, t=t, Vs=Vs, Rq=Rq, d=d
         )
+    else:
+        print("Base model feasible, Added Constraints INFEASIBLE.")
 else:
-    print("INFEASIBLE or no incumbent available to warm-start.")
+    print("INFEASIBLE.")
