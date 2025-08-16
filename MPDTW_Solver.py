@@ -161,7 +161,7 @@ def Run_Model(inst):
     """
     POTENTIAL CONSTRAINTS TO ADD??
     """
-    if True:
+    if False:
         P = [p for r in R for p in Pr[r]]
         # --- Y[p,k] = 1 if pickup node p is directly connected to depot by vehicle k
         Y = {(p, k): model.addVar(vtype=GRB.BINARY) for p in P for k in K}
