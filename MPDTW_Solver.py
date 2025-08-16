@@ -161,7 +161,7 @@ def Run_Model(inst):
     """
     POTENTIAL CONSTRAINTS TO ADD??
     """
-    if False:
+    if True:
         P = [p for r in R for p in Pr[r]]
         # --- Y[p,k] = 1 if pickup node p is directly connected to depot by vehicle k
         Y = {(p, k): model.addVar(vtype=GRB.BINARY) for p in P for k in K}
@@ -215,6 +215,6 @@ def Run_Model(inst):
         print("INFEASIBLE")
 
 
-Filename = "l_4_25_1.txt"
+Filename = "n_4_25_3.txt"
 inst = build_milp_data(Filename)
 Run_Model(inst)
