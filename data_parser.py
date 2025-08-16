@@ -176,7 +176,7 @@ def build_milp_data(filename, cost_equals_time=True, speed=1.0):
     A = [(i, j) for i in V for j in V]
 
     # Data (parameters)
-    K = inst["vehicles"]          # number of vehicles
+    K = range(int(inst["vehicles"]))  # number of vehicles
     Q = inst["capacity"]          # capacity per vehicle
     e = inst["tw_a"]              # e_j
     l = inst["tw_b"]              # l_j
