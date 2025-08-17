@@ -1,224 +1,160 @@
 from mpdptw.common.cli import parse_instance_argv
-from mpdptw.common.printers import print_solution_summary
+from mpdptw.common.solution_printer import print_solution_summary
 from mpdptw.common.parsers import build_milp_data
 from gurobipy import *
 
-def Run_Model(inst):
-    V = inst["V"]
-    P = inst["P"]
+
+
+
+def Run_Model(inst, model: Model):
+    EPS = 1e-6
+    # Sets (extended with sink depot)
+    V = inst["V_ext"]  # all nodes including origin (0) and sink
+    A = inst["A_feasible_ext"]  # feasible arcs 
     N = inst["N"]
-    K = inst["K"]
-    R = inst["R"]
-    Q = inst["Q"]
 
-    Dr = inst["Dr"]
-    Pr = inst["Pr"]
-    c = inst["c"]
-    e = inst["e"]
-    l = inst["l"]
-    t = inst["t"]
-    d = inst["d"]
-    q = inst["q"]
+    R = inst["R"]  # request ids
+    Pr = inst["Pr"]  # pickups per request
+    Dr = inst["Dr"]  # deliveries per request
+    Dr_single = inst["Dr_single"]  # single delivery per request
+    S_min = inst["S_minimal_ext"]  # minimal S-sets from paper
 
+    # Build adjacency from A once 
+    in_arcs  = {j: [] for j in V}
+    out_arcs = {i: [] for i in V}
+    for (i, j) in A:
+        out_arcs[i].append((i, j))
+        in_arcs[j].append((i, j))
+    
+    K = inst["K"]  # vehicles
+    Q = inst["Q"]  # capacity
 
-    ReqNodes = {r: Dr[r] + Pr[r] for r in R}
+    # Parameters (extended)
+    e = inst["e"]  # earliest start
+    l = inst["l"]  # latest start
+    d = inst["d"]  # service time
+    q = inst["q"]  # demand
+    t = inst["t_ext"]  # travel time (extended)
+    c = inst["c_ext"]  # travel cost (extended)
+    V_ext = inst["V_ext"]
+    M_ij = {(i,j): max(0.0, l[i] + d[i] + t[i,j] - e[j]) for (i,j) in A}
 
+    # Special nodes
+    depot = inst["depot"]  # start depot (0)
+    sink = inst["sink"]  # sink depot
+    start_nodes = [j for (_, j) in out_arcs[depot] if j != sink]
+    # Decision variables (to be declared in solver)
+    X = {(i, j): model.addVar(vtype=GRB.BINARY) for (i, j) in A}  # binary arc use
+    S = {i: model.addVar(vtype=GRB.CONTINUOUS) for i in V}  # continuous service start times
+    Z = {i : model.addVar(vtype=GRB.CONTINUOUS) for i in N}
+    model.setObjective(quicksum(X[i, j] * c[i, j] for (i, j) in A), GRB.MINIMIZE)
+    
 
-    M = {
-        (i, j): max(0, l[i] + d[i] + t[i, j] - e[j])
-        for i in N + [0]
-        for j in N + [0]
-        if i != j
-    }
-    W = {(i, j): min(Q, Q + q[i]) for i in N + [0] for j in N + [0] if i != j}
-
-    model = Model("MPDTW")
-
-    X = {(i, j): model.addVar(vtype=GRB.BINARY) for i in V for j in V}
-    S = {j: model.addVar() for j in V}
-    C = {j: model.addVar() for j in V}
-    Rq = {(m, n): model.addVar(vtype=GRB.BINARY) for m in R for n in R}
-    Vs = {(r, k): model.addVar(vtype=GRB.BINARY) for k in K for r in R}
-
-
-    # --- Flow conservation (Degree constraints: eqs. (2), (3))
-    IncomingFlow = {
-        j: model.addConstr(quicksum(X[i, j] for i in V if j != i) == 1) for j in N
-    }
-    OutgoingFlow = {
-        i: model.addConstr(quicksum(X[i, j] for j in V if j != i) == 1) for i in N
-    }
-     # --- Limit number of vehicles used (Fleet size constraint: eq. (4))
-    VehicleCapMax = model.addConstr(len(K) >= quicksum(X[0, j] for j in N))
-    VehicleCapMin = model.addConstr(quicksum(X[0, j] for j in N) >= 1)
-    # --- Service time window bounds (Time window constraints: eq. (5))
-    EarliestService = {j: model.addConstr(S[j] >= e[j]) for j in V}
-    LatestService = {j: model.addConstr(S[j] <= l[j]) for j in V}
-
-    # --- Lifted time window constraints (Service start propagation: eqs. (6*a,b,c))
-    ServiceWindowAStar = {
-        (i, j): model.addConstr(
-            S[j]
-            >= S[i]
-            + d[i]
-            + t[i, j]
-            - M[i, j] * (1 - X[i, j])
-            + (M[i, j] - d[i] - t[i, j] - max(d[i] + t[j, i], e[i] - e[j])) * X[i, j]
-        )
-        for i in N
-        for j in N
-        if i != j
-    }
-    ServiceWindowBStar = {
-        j: model.addConstr(S[j] >= d[0] + t[0, j] - M[0, j] * (1 - X[0, j])) for j in N
-    }
-
-    ServiceWindowCStar = {
-        i: model.addConstr(S[0] >= S[i] + d[i] + t[i, 0] - M[i, 0] * (1 - X[i, 0]))
-        for i in N
-    }
-
-    # --- Precedence: pickup before delivery for each request (eq. (7))
-    Precendence = {
-        (r, d, p): model.addConstr(S[d] >= S[p]) for r in R for d in Dr[r] for p in Pr[r]
-    }
-
-    # --- Coupling: enforce same vehicle for linked requests (eqs. (8), (9))
-    ConnectedRequests = {
-        (k, m, n): model.addConstr(Rq[m, n] <= 1 + Vs[m, k] - Vs[n, k])
-        for k in K
-        for m in R
-        for n in R
-    }
-
-    TwoConnectedRequests = {
-        (m, n, i, j): model.addConstr(X[i, j] <= Rq[m, n])
-        for m in R
-        for n in R
-        if m != n
-        for i in ReqNodes[m]
-        for j in ReqNodes[n]
-        if (i, j) in X
-    }
-
-    # --- Each request served by exactly one vehicle (eq. (10))
-    VehicleServes = {r: model.addConstr(quicksum(Vs[r, k] for k in K) == 1) for r in R}
-
-    # --- Vehicle capacity respected at nodes (eq. (11))
-    LoadCap = {j: model.addConstr(C[j] <= Q) for j in N}
-
-    # --- Vehicle capacity respected at nodes (eq. (11))
-    VehicleCapAtNodeA = {
-        (i, j): model.addConstr(
-            C[j]
-            >= C[i] + q[j] - W[i, j] * (1 - X[i, j]) + (W[i, j] - q[i] - q[j]) * X[j, i]
-        )
-        for i in N
-        for j in N
-        if i != j
-    }
-
-    VehicleCapAtNodeB = {
-        j: model.addConstr(
-            C[j] >= q[j] - W[0, j] * (1 - X[0, j]) + (W[0, j] - q[0] - q[j]) * X[j, 0]
-        )
+    # Degree (incoming = 1 for each customer j)
+    DegreeConstrainIncome = {
+        j: model.addConstr(quicksum(X[i, j] for (i, j) in in_arcs[j]) == 1)
         for j in N
     }
 
-    # --- Vehicle flow balance at depot (Start=Finish: eq. (13))
-    StartFinishDepot = model.addConstr(
-        quicksum(X[0, j] for j in N) == quicksum(X[i, 0] for i in N)
-    )
-
-    # --- Valid inequalities to cut infeasible arcs (eqs. (14)–(20))
-    NoNodeToItself = model.addConstr(quicksum(X[i, i] for i in V) == 0)
-
-    NoPickupToDepot = model.addConstr(quicksum(X[i, 0] for r in R for i in Pr[r]) == 0)
-
-    NoDeliveryToPick = model.addConstr(
-        quicksum(X[d, i] for r in R for i in Pr[r] for d in Dr[r]) == 0
-    )
-
-    NoDepotToDelivery = model.addConstr(quicksum(X[0, d] for r in R for d in Dr[r]) == 0)
-
-    OneWayConnection = {
-        (i, j): model.addConstr(X[i, j] + X[j, i] <= 1) for i in V for j in V if i < j
+    # Degree (outgoing = 1 for each customer i)
+    DegreeConstrainOutgoing = {
+        i: model.addConstr(quicksum(X[i, j] for (i, j) in out_arcs[i]) == 1)
+        for i in N
     }
 
+    VehicleUsageLimit = model.addConstr(quicksum(X[0, j] for (_,j) in out_arcs[0]) <= len(K))
+    
+    TimeWindowFeas = {(i, j):
+                      model.addConstr(S[j]>= S[i] + d[i] + t[i, j] - M_ij[i,j]*(1-X[i, j]))
+    for (i, j) in A}
+    
 
-    OneRequestNodeToDepot = {
-        r: model.addConstr(quicksum(X[0, j] for j in Pr[r]) <= 1) for r in R
-    }
+    TimeFeasLatest = {i :
+                       model.addConstr(S[i] <= l[i])
+    for i in V}
+    
+    TimeFeasEarliest = {i :
+                       model.addConstr(S[i] >= e[i])
+    for i in V}
 
-    ServiceWindowInfeasible = {
-        (i, j): model.addConstr(X[i, j] == 0)
-        for i in V
-        for j in V
-        if l[j] < e[i] + d[i] + t[i, j]
-    }
+    RequestPrec = {(i, r):
+                   model.addConstr(S[Dr_single[r]] >= S[i] + d[i] + t[i, Dr_single[r]])
+                   for r in R for i in Pr[r]}
+    
+    PDSameRoute = {(i, r):
+                   model.addConstr(Z[Dr_single[r]] == Z[i])
+    for r in R for i in Pr[r]}
 
-
-    """
-    POTENTIAL CONSTRAINTS TO ADD??
-    """
-    if True:
-        P = [p for r in R for p in Pr[r]]
-        # --- Y[p,k] = 1 if pickup node p is directly connected to depot by vehicle k
-        Y = {(p, k): model.addVar(vtype=GRB.BINARY) for p in P for k in K}
-        
-        # --- Link depot arc variable X[0,p] with Y[p,k] assignments (start arc link consistency)
-        StartArcLink = {
-            p: model.addConstr(quicksum(Y[p, k] for k in K) == X[0, p]) for p in P
-        }
-
-        # --- Ensure consistency: if pickup p belongs to request r served by vehicle k (Vs[r,k]=1),
-        #     then Y[p,k] can be active; otherwise it must be 0
-        Yconsistency = {
-            (p, k): model.addConstr(Y[p, k] <= Vs[r, k])
-            for r in R
-            for p in Pr[r]
-            for k in K
-        }
-        # --- Z[k] = 1 if vehicle k is actually used (starts service at some pickup)
-        Z = {k: model.addVar(vtype=GRB.BINARY) for k in K}
-
-        # --- At most one pickup node can be the start for each vehicle k
-        StartArcLimit = {k: model.addConstr(quicksum(Y[p, k] for p in P) <= 1) for k in K}
-        
-        # --- Activate Z[k] if vehicle k starts at some pickup node
-        StartUsed = {k: model.addConstr(quicksum(Y[p, k] for p in P) == Z[k]) for k in K}
-
-        # --- Linking: if vehicle k serves request r, then vehicle k must be active (Z[k]=1)
-        AssignImpliesUsed = {
-            (r, k): model.addConstr(Vs[r, k] <= Z[k]) for r in R for k in K
-        }
-
-        # --- Total number of start arcs (X[0,p]) equals number of vehicles used (sum of Z[k])
-        StartsEqualVehiclesUsed = model.addConstr(
-            quicksum(X[0, p] for p in P) == quicksum(Z[k] for k in K)
-        )
-
-        
+    RouteIdentifier1 = {j:
+                       model.addConstr(Z[j] >= j*X[0, j])
+    for j in start_nodes}
 
 
-    model.setObjective(quicksum(X[i, j] * c[i, j] for i in V for j in V))
+    RouteIdentifier2 = {j:
+                       model.addConstr(Z[j] <= j*X[0, j] - len(N)*(X[0, j] -1))
+    for j in start_nodes}
 
-    model.optimize()
-    if model.status == GRB.OPTIMAL:
+    IndexFoward1 = {(i, j):
+                    model.addConstr(Z[j] >= Z[i] + len(N)*(X[i, j] -1))
+    for i in N for j in N if (i, j) in X}
 
-        print_solution_summary(
-    model, V, N, R, K, Pr, Dr, X, S, C, e, l, q, t=t, Vs=Vs, Rq=Rq, d=d
-)   
+    IndexFoward2 = {(i, j):
+                    model.addConstr(Z[j] <= Z[i] + len(N)*(1-X[i, j]))
+    for i in N for j in N if (i, j) in X}
 
+    def build_Sset(xvals):
+        Sset = set()
+        succ =  {}
+        for (i, j) in A:
+            if i in N:
+                if xvals[i, j] > 0.5:
+                    succ[i] = j
+        unvisited = set(N)
 
-    else:
-        print("INFEASIBLE")
+        while unvisited:
+            u = unvisited.pop()
+            path = []
+            pos = {}
+            while True:
+                if u not in succ:
+                    break
+                if u in pos:
+                    k = pos[u]
+                    cycle = path[k:]
+                    if len(cycle) >= 2:
+                        Sset.add(frozenset(cycle))
+                    break
+                pos[u] = len(path)
+                path.append(u)
+                unvisited.discard(u)
+                u = succ[u]
+        return Sset
 
+    def subtour_callback(model, where):
+        if where == GRB.Callback.MIPSOL:
+            XV = model.cbGetSolution(X)
+            Sset = build_Sset(XV)
+            for s in Sset:
+                stronger = False
+                for r in R:
+                    if all(p in s for p in Pr[r]) and Dr_single[r] not in s:
+                        stronger = True
+                        break
 
+                rhs = len(s) - 2 if stronger else len(s) - 1
+                model.cbLazy(quicksum(X[i, j] for i in s for j in s if (i, j) in X) <= rhs)
+                
+    model.optimize(subtour_callback)
+
+    print_solution_summary(model, V_ext, N, R, K, Pr, Dr, X, S, e, l, q, t=t, sink=sink, d=d)
 
 def main(argv=None):
-    path, _ = parse_instance_argv(argv, default_filename="l_4_25_1.txt")
+    path, _ = parse_instance_argv(argv, default_filename="l_4_25_4.txt")
     inst = build_milp_data(str(path))
-    Run_Model(inst)
+    model = Model("MPDTW")
+    model.setParam(GRB.Param.LazyConstraints, 1)
+    Run_Model(inst, model)
+
+
 if __name__ == "__main__":
     main()
