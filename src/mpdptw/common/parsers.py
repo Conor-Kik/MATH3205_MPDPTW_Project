@@ -217,7 +217,8 @@ def build_milp_data(filename, cost_equals_time=True, speed=1.0):
 
     # Minimal S-sets (one per request)
     S_minimal_ext = _compute_minimal_S_sets(Pr, Dr_single, sink, start=0)
-
+    e[sink] = e[0]
+    l[sink] = l[0]
     return {
 
         "V": V, "P": P, "D": D, "N": N, "A": A,
