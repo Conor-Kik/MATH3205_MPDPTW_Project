@@ -12,6 +12,7 @@ REGISTRY: Dict[str, Dict[str, str]] = {
 
     },
     "three_index": {
+       "baseline": "mpdptw.methods.three_index.MPDTW_Solver:main", 
     },
 }
 
