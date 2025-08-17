@@ -1,7 +1,7 @@
+from mpdptw.common.cli import parse_instance_argv
+from mpdptw.common.printers import print_solution_summary
+from mpdptw.common.parsers import build_milp_data
 from gurobipy import *
-from data_parser import build_milp_data
-from solution_printer import print_solution_summary
-
 
 def Run_Model(inst):
     V = inst["V"]
@@ -161,7 +161,7 @@ def Run_Model(inst):
     """
     POTENTIAL CONSTRAINTS TO ADD??
     """
-    if False:
+    if True:
         P = [p for r in R for p in Pr[r]]
         # --- Y[p,k] = 1 if pickup node p is directly connected to depot by vehicle k
         Y = {(p, k): model.addVar(vtype=GRB.BINARY) for p in P for k in K}
@@ -215,6 +215,10 @@ def Run_Model(inst):
         print("INFEASIBLE")
 
 
-Filename = "n_4_25_3.txt"
-inst = build_milp_data(Filename)
-Run_Model(inst)
+
+def main(argv=None):
+    path, _ = parse_instance_argv(argv, default_filename="l_4_25_1.txt")
+    inst = build_milp_data(str(path))
+    Run_Model(inst)
+if __name__ == "__main__":
+    main()
