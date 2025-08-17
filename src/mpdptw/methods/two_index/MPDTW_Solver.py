@@ -47,8 +47,17 @@ def Run_Model(inst, model: Model):
     X = {(i, j): model.addVar(vtype=GRB.BINARY) for (i, j) in A}  # binary arc use
     S = {i: model.addVar(vtype=GRB.CONTINUOUS) for i in V}  # continuous service start times
     Z = {i : model.addVar(vtype=GRB.CONTINUOUS) for i in N}
+    C = {i : model.addVar(vtype= GRB.CONTINUOUS) for i in N}
     model.setObjective(quicksum(X[i, j] * c[i, j] for (i, j) in A), GRB.MINIMIZE)
-    
+
+    Mq = { (i,j): max(0.0, Q - min(0.0, q[j])) for (i,j) in A if i != depot and j != sink }
+    CapacityFlow = {(i, j):
+                model.addConstr(C[j] >= C[i] + q[j] - Mq[(i,j)]*(1 - X[i,j]))
+                for (i, j) in A if i != depot and j != sink}
+
+    CapacityBounds = {i:
+                      model.addConstr(C[i] <= Q)
+                      for i in N}
 
     # Degree (incoming = 1 for each customer j)
     DegreeConstrainIncome = {
