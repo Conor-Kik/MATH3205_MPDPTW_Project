@@ -32,16 +32,22 @@ def Run_Model(inst, model: Model):
     # Parameters (extended)
     e = inst["e"]  # earliest start
     l = inst["l"]  # latest start
+
     d = inst["d"]  # service time
     q = inst["q"]  # demand
     t = inst["t_ext"]  # travel time (extended)
     c = inst["c_ext"]  # travel cost (extended)
     V_ext = inst["V_ext"]
-    M_ij = {(i,j): max(0.0, l[i] + d[i] + t[i,j] - e[j]) for (i,j) in A}
 
     # Special nodes
     depot = inst["depot"]  # start depot (0)
     sink = inst["sink"]  # sink depot
+
+    e[sink] = e[0]
+    l[sink] = l[0]
+    M_ij = {(i,j): max(0.0, l[i] + d[i] + t[i,j] - e[j]) for (i,j) in A}
+
+
     start_nodes = [j for (_, j) in out_arcs[depot] if j != sink]
     # Decision variables (to be declared in solver)
     X = {(i, j): model.addVar(vtype=GRB.BINARY) for (i, j) in A}  # binary arc use
