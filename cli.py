@@ -9,7 +9,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
 REGISTRY: Dict[str, Dict[str, str]] = {
     "two_index": {
         "baseline": "mpdptw.methods.two_index.MPDTW_Solver:main",
-        "warmstart": "mpdptw.methods.two_index.MPDTW_Solver_Warm_Start:main",
 
     },
     "three_index": {

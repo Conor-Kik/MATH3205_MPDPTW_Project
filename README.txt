@@ -43,7 +43,7 @@ python cli.py <method> <approach> <instance_filename>
 ### Example
 
 ```bash
-python cli.py two_index warmstart l_4_25_1.txt
+python cli.py two_index baseline l_4_25_1.txt
 ```
 
 This will:
