@@ -37,7 +37,7 @@ python cli.py <method> <approach> <instance_filename>
 ```
 
 - `<method>` → the method name (e.g., `two_index`)
-- `<approach>` → the specific solver/approach file (warmstart `.py`)
+- `<approach>` → the specific solver/approach file
 - `<instance_filename>` → the instance file located inside `mpdtw_instances_2019/`
 
 ### Example
@@ -47,7 +47,7 @@ python cli.py two_index baseline l_4_25_1.txt
 ```
 
 This will:
-1. Load `mpdtw/methods/two_index/MPDTW_Solver_Warm_Start.py`
+1. Load `mpdtw/methods/two_index/MPDTW_Solver.py`
 2. Run it on the instance `mpdtw_instances_2019/l_4_25_1.txt`
 
 ---
