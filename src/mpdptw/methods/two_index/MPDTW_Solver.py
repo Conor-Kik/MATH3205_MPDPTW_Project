@@ -14,7 +14,7 @@ def Run_Model(path, model: Model):
     if match:
         number_str = match.group(1)   
         Request_Length = int(number_str)
-        if Request_Length != 4:
+        if Request_Length not in (4, 8):
             raise ValueError("Matched Value should be 4")
     else:
         Request_Length = 8
