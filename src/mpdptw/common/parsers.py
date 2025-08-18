@@ -90,6 +90,7 @@ def parse_instance_text(text, name="instance"):
     }
 
 def parse_instance_file(filename):
+    print(filename)
     if ("/" in filename) or ("\\" in filename):
         path = filename
     else:
@@ -219,6 +220,7 @@ def build_milp_data(filename, cost_equals_time=True, speed=1.0):
     S_minimal_ext = _compute_minimal_S_sets(Pr, Dr_single, sink, start=0)
     e[sink] = e[0]
     l[sink] = l[0]
+    q[sink] = 0
     return {
 
         "V": V, "P": P, "D": D, "N": N, "A": A,

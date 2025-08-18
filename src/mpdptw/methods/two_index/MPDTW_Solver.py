@@ -2,11 +2,24 @@ from mpdptw.common.cli import parse_instance_argv
 from mpdptw.common.solution_printer import print_solution_summary
 from mpdptw.common.parsers import build_milp_data
 from gurobipy import *
+import re 
 
 
 
+def Run_Model(path, model: Model):
+    inst = build_milp_data(str(path))
+    filename = path.split("\\")[-1]   # "l_4_25_1.txt"
 
-def Run_Model(inst, model: Model):
+    match = re.search(r'_(\d+)_', filename)
+    if match:
+        number_str = match.group(1)   
+        Request_Length = int(number_str)
+        if Request_Length != 4:
+            raise ValueError("Matched Value should be 4")
+    else:
+        Request_Length = 8
+
+
     EPS = 1e-6
     # Sets (extended with sink depot)
     V = inst["V_ext"]  # all nodes including origin (0) and sink
@@ -42,9 +55,6 @@ def Run_Model(inst, model: Model):
     # Special nodes
     depot = inst["depot"]  # start depot (0)
     sink = inst["sink"]  # sink depot
-
-    e[sink] = e[0]
-    l[sink] = l[0]
     M_ij = {(i,j): max(0.0, l[i] + d[i] + t[i,j] - e[j]) for (i,j) in A}
 
 
@@ -53,17 +63,21 @@ def Run_Model(inst, model: Model):
     X = {(i, j): model.addVar(vtype=GRB.BINARY) for (i, j) in A}  # binary arc use
     S = {i: model.addVar(vtype=GRB.CONTINUOUS) for i in V}  # continuous service start times
     Z = {i : model.addVar(vtype=GRB.CONTINUOUS) for i in N}
-    C = {i : model.addVar(vtype= GRB.CONTINUOUS) for i in N}
+    
+    if Request_Length == 8:
+        print("*************************************************")
+        print("Adding Capacity Constrain for Longer Request Data")
+        print("*************************************************")
+        C = {i : model.addVar(vtype= GRB.CONTINUOUS, lb=0, ub= Q) for i in V_ext}
+        CapacityFlow = {(i, j):
+                    model.addConstr(C[j] >= C[i] + q[j] -  max(0.0, Q + q[j])*(1 - X[i,j]))
+                    for (i, j) in A}
+        CapacityBounds = {i:
+                        model.addConstr(C[i] <= Q)
+                        for i in N}
+    
     model.setObjective(quicksum(X[i, j] * c[i, j] for (i, j) in A), GRB.MINIMIZE)
 
-    Mq = { (i,j): max(0.0, Q - min(0.0, q[j])) for (i,j) in A if i != depot and j != sink }
-    CapacityFlow = {(i, j):
-                model.addConstr(C[j] >= C[i] + q[j] - Mq[(i,j)]*(1 - X[i,j]))
-                for (i, j) in A if i != depot and j != sink}
-
-    CapacityBounds = {i:
-                      model.addConstr(C[i] <= Q)
-                      for i in N}
 
     # Degree (incoming = 1 for each customer j)
     DegreeConstrainIncome = {
@@ -162,13 +176,12 @@ def Run_Model(inst, model: Model):
     model.optimize(subtour_callback)
 
     print_solution_summary(model, V_ext, N, R, K, Pr, Dr, X, S, e, l, q, t=t, sink=sink, d=d)
-
+    
 def main(argv=None):
     path, _ = parse_instance_argv(argv, default_filename="l_4_25_4.txt")
-    inst = build_milp_data(str(path))
     model = Model("MPDTW")
     model.setParam(GRB.Param.LazyConstraints, 1)
-    Run_Model(inst, model)
+    Run_Model(str(path), model)
 
 
 if __name__ == "__main__":
