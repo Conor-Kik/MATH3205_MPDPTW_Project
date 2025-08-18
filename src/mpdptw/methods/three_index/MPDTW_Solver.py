@@ -1,0 +1,210 @@
+from mpdptw.common.cli import parse_instance_argv
+from mpdptw.common.solution_printer import print_solution_summary
+from mpdptw.common.parsers import build_milp_data
+from gurobipy import *
+
+
+
+
+def Run_Model(inst, model: Model):
+    EPS = 1e-6
+    # Sets (extended with sink depot)
+    V = inst["V_ext"]  # all nodes including origin (0) and sink
+    A = inst["A_feasible_ext"]  # feasible arcs 
+    N = inst["N"]
+
+    R = inst["R"]  # request ids
+    Pr = inst["Pr"]  # pickups per request
+    Dr = inst["Dr"]  # deliveries per request
+    Dr_single = inst["Dr_single"]  # single delivery per request
+    S_min = inst["S_minimal_ext"]  # minimal S-sets from paper
+
+    # Build adjacency from A once 
+    in_arcs  = {j: [] for j in V}
+    out_arcs = {i: [] for i in V}
+    for (i, j) in A:
+        out_arcs[i].append((i, j))
+        in_arcs[j].append((i, j))
+    
+    K = inst["K"]  # vehicles
+    Q = inst["Q"]  # capacity
+
+    # Parameters (extended)
+    e = inst["e"]  # earliest start
+    l = inst["l"]  # latest start
+
+    d = inst["d"]  # service time
+    q = inst["q"]  # demand
+    t = inst["t_ext"]  # travel time (extended)
+    c = inst["c_ext"]  # travel cost (extended)
+    V_ext = inst["V_ext"]
+
+    # Special nodes
+    depot = inst["depot"]  # start depot (0)
+    sink = inst["sink"]  # sink depot
+
+    e[sink] = e[0]
+    l[sink] = l[0]
+    M_ij = {(i,j): max(0.0, l[i] + d[i] + t[i,j] - e[j]) for (i,j) in A}
+
+
+    start_nodes = [j for (_, j) in out_arcs[depot] if j != sink]
+    
+    ### NEWWWWW
+    # Decision variables (to be declared in solver)
+    X = {(i, j, k): model.addVar(vtype=GRB.BINARY) for (i, j) in A for k in K}  # binary arc use, 1 if vehicle k goes from i to j
+    Y = {(r, k): model.addVar(vtype=GRB.BINARY) for r in R for k in K} #1 if request r completed by vehicle k 
+    S = {i: model.addVar(vtype=GRB.CONTINUOUS) for i in V}  # continuous service start times
+    
+    #A is a list of tuples, [(i,j), ...], N = {1, ...., p, p+1, ..., p+n} = P U D
+    
+    #A+(i) = set of nodes j such that there is an arc from i to j, all arcs leaving i??>
+    def A_plus(node):
+        nodes_leaving = []
+        for (i, j) in A:
+            if node == i:
+                #should return a j value
+                nodes_leaving.append(j)
+        return nodes_leaving
+    
+    #A-(i) = set of all nodes j such that arc j to i, all arcs entering i
+    def A_minus(node):
+        nodes_entering = []
+        for (i, j) in A:
+            if node == j:
+                #should return a j value
+                nodes_entering.append(i)
+        return nodes_entering
+    
+    
+
+    model.setObjective(quicksum(quicksum(X[i, j, k] * c[i, j] for (i, j) in A) for k in K), GRB.MINIMIZE)
+    
+    #Constraints
+    
+    
+    # Decision variables (to be declared in solver)
+    X = {(i, j): model.addVar(vtype=GRB.BINARY) for (i, j) in A}  # binary arc use
+    S = {i: model.addVar(vtype=GRB.CONTINUOUS) for i in V}  # continuous service start times
+    Z = {i : model.addVar(vtype=GRB.CONTINUOUS) for i in N}
+    C = {i : model.addVar(vtype= GRB.CONTINUOUS) for i in N}
+    
+    model.setObjective(quicksum(X[i, j] * c[i, j] for (i, j) in A), GRB.MINIMIZE)
+
+    Mq = { (i,j): max(0.0, Q - min(0.0, q[j])) for (i,j) in A if i != depot and j != sink }
+    CapacityFlow = {(i, j):
+                model.addConstr(C[j] >= C[i] + q[j] - Mq[(i,j)]*(1 - X[i,j]))
+                for (i, j) in A if i != depot and j != sink}
+
+    CapacityBounds = {i:
+                      model.addConstr(C[i] <= Q)
+                      for i in N}
+
+    # Degree (incoming = 1 for each customer j)
+    DegreeConstrainIncome = {
+        j: model.addConstr(quicksum(X[i, j] for (i, j) in in_arcs[j]) == 1)
+        for j in N
+    }
+
+    # Degree (outgoing = 1 for each customer i)
+    DegreeConstrainOutgoing = {
+        i: model.addConstr(quicksum(X[i, j] for (i, j) in out_arcs[i]) == 1)
+        for i in N
+    }
+
+    VehicleUsageLimit = model.addConstr(quicksum(X[0, j] for (_,j) in out_arcs[0]) <= len(K))
+    
+    TimeWindowFeas = {(i, j):
+                      model.addConstr(S[j]>= S[i] + d[i] + t[i, j] - M_ij[i,j]*(1-X[i, j]))
+    for (i, j) in A}
+    
+
+    TimeFeasLatest = {i :
+                       model.addConstr(S[i] <= l[i])
+    for i in V}
+    
+    TimeFeasEarliest = {i :
+                       model.addConstr(S[i] >= e[i])
+    for i in V}
+
+    RequestPrec = {(i, r):
+                   model.addConstr(S[Dr_single[r]] >= S[i] + d[i] + t[i, Dr_single[r]])
+                   for r in R for i in Pr[r]}
+    
+    PDSameRoute = {(i, r):
+                   model.addConstr(Z[Dr_single[r]] == Z[i])
+    for r in R for i in Pr[r]}
+
+    RouteIdentifier1 = {j:
+                       model.addConstr(Z[j] >= j*X[0, j])
+    for j in start_nodes}
+
+
+    RouteIdentifier2 = {j:
+                       model.addConstr(Z[j] <= j*X[0, j] - len(N)*(X[0, j] -1))
+    for j in start_nodes}
+
+    IndexFoward1 = {(i, j):
+                    model.addConstr(Z[j] >= Z[i] + len(N)*(X[i, j] -1))
+    for i in N for j in N if (i, j) in X}
+
+    IndexFoward2 = {(i, j):
+                    model.addConstr(Z[j] <= Z[i] + len(N)*(1-X[i, j]))
+    for i in N for j in N if (i, j) in X}
+
+    def build_Sset(xvals):
+        Sset = set()
+        succ =  {}
+        for (i, j) in A:
+            if i in N:
+                if xvals[i, j] > 0.5:
+                    succ[i] = j
+        unvisited = set(N)
+
+        while unvisited:
+            u = unvisited.pop()
+            path = []
+            pos = {}
+            while True:
+                if u not in succ:
+                    break
+                if u in pos:
+                    k = pos[u]
+                    cycle = path[k:]
+                    if len(cycle) >= 2:
+                        Sset.add(frozenset(cycle))
+                    break
+                pos[u] = len(path)
+                path.append(u)
+                unvisited.discard(u)
+                u = succ[u]
+        return Sset
+
+    def subtour_callback(model, where):
+        if where == GRB.Callback.MIPSOL:
+            XV = model.cbGetSolution(X)
+            Sset = build_Sset(XV)
+            for s in Sset:
+                stronger = False
+                for r in R:
+                    if all(p in s for p in Pr[r]) and Dr_single[r] not in s:
+                        stronger = True
+                        break
+
+                rhs = len(s) - 2 if stronger else len(s) - 1
+                model.cbLazy(quicksum(X[i, j] for i in s for j in s if (i, j) in X) <= rhs)
+                
+    model.optimize(subtour_callback)
+
+    print_solution_summary(model, V_ext, N, R, K, Pr, Dr, X, S, e, l, q, t=t, sink=sink, d=d)
+
+def main(argv=None):
+    path, _ = parse_instance_argv(argv, default_filename="l_4_25_4.txt")
+    inst = build_milp_data(str(path))
+    model = Model("MPDTW")
+    model.setParam(GRB.Param.LazyConstraints, 1)
+    Run_Model(inst, model)
+
+
+if __name__ == "__main__":
+    main()
