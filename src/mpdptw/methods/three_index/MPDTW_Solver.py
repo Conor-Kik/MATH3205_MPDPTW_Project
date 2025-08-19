@@ -50,9 +50,6 @@ def Run_Model(inst, model: Model):
     start_nodes = [j for (_, j) in out_arcs[depot] if j != sink]
     
     print(A)
-    print(K)
-    print(Dr_single)
-    print(Pr)
     
     ### NEWWWWW
     # Decision variables (to be declared in solver)
