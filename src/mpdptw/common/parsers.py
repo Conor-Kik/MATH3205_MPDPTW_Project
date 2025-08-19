@@ -168,6 +168,7 @@ def build_milp_data(filename, cost_equals_time=True, speed=1.0):
     D = inst["D"]
     N = inst["C"]
     R = list(inst["R"].keys())
+    R_dict = inst["R"]
     Pr = {r: list(inst["R"][r]["pickups"])    for r in R}
     Dr = {r: list(inst["R"][r]["deliveries"]) for r in R}
     A = [(i, j) for i in V for j in V]  
@@ -233,7 +234,7 @@ def build_milp_data(filename, cost_equals_time=True, speed=1.0):
     return {
 
         "V": V, "P": P, "D": D, "N": N, "A": A,
-        "R": R, "Pr": Pr, "Dr": Dr,
+        "R": R, "R_dict": R_dict, "Pr": Pr, "Dr": Dr,
         "K": K, "Q": Q,
         "e": e, "l": l, "d": d, "q": q,
         "t": t, "c": c,
