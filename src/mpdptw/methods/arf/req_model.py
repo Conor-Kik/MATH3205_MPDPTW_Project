@@ -5,6 +5,8 @@ import itertools
 
 def Infeasible_Req_Pairs(R, e, l, Pr, Dr, c, q, sink, d, Q, inst):
     """
+    This is a greedy search algorimth that attempts to find a feasible route by
+    going to the next legal node with the lowest earliest start time.
     Try each pair of requests (r1, r2). For each pair we:
       1) Attempt a simple greedy construction of a feasible route on the extended graph.
       2) If the greedy attempt can't find a route, we confirm infeasibility by calling
@@ -33,6 +35,7 @@ def Infeasible_Req_Pairs(R, e, l, Pr, Dr, c, q, sink, d, Q, inst):
     def is_global_pickup(n, r1, r2):
         """
         A "global-window" pickup: same time window as the depot.
+        This is important since we don't want to prioritise pickups with no time window
         """
         if not is_pickup(n, r1, r2):
             return False
