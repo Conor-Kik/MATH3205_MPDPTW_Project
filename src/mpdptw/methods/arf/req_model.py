@@ -172,6 +172,11 @@ def Infeasible_Req_Pairs(R, e, l, Pr, Dr, c, q, sink, d, Q, inst):
 
 
 def Build_infeas_model(r1, r2, inst):
+    """
+    Here we build a small model similar to the Two-Index and Three-Index formulations
+    This is essentially a brute force way of checking feasiblity if the greedy
+    algo fails
+    """
     model = Model("Pair Check")
     feasible, work = pair_feasible(inst, r1, r2, model, output_flag=0)
     return not feasible
