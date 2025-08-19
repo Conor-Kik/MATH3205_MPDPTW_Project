@@ -1,9 +1,8 @@
 from mpdptw.common.cli import parse_instance_argv
-from mpdptw.common.solution_printer import print_solution_summary
+from mpdptw.common.two_index_solution_printer import print_solution_summary
 from mpdptw.common.parsers import build_milp_data
 from gurobipy import *
 import re 
-
 
 
 def Run_Model(path, model: Model):
@@ -64,30 +63,28 @@ def Run_Model(path, model: Model):
     S = {i: model.addVar(vtype=GRB.CONTINUOUS) for i in V}  # continuous service start times
     Z = {i : model.addVar(vtype=GRB.CONTINUOUS) for i in N}
     
-    if Request_Length == 8:
-        print("*************************************************")
+
+    if  Request_Length == 8:
+        print("**************************************************")
         print("Adding Capacity Constrain for Longer Request Data")
-        print("*************************************************")
+        print("**************************************************")
         C = {i : model.addVar(vtype= GRB.CONTINUOUS, lb=0, ub= Q) for i in V_ext}
         CapacityFlow = {(i, j):
-                    model.addConstr(C[j] >= C[i] + q[j] -  max(0.0, Q + q[j])*(1 - X[i,j]))
+                    model.addConstr(C[j] >= C[i] + q[j] -  max(0.0, Q +  q[j])*(1 - X[i,j]))
                     for (i, j) in A}
-        CapacityBounds = {i:
-                        model.addConstr(C[i] <= Q)
-                        for i in N}
-    
+
     model.setObjective(quicksum(X[i, j] * c[i, j] for (i, j) in A), GRB.MINIMIZE)
 
 
     # Degree (incoming = 1 for each customer j)
     DegreeConstrainIncome = {
-        j: model.addConstr(quicksum(X[i, j] for (i, j) in in_arcs[j]) == 1)
+        j: model.addConstr(quicksum(X[i, j] for (i, _) in in_arcs[j]) == 1)
         for j in N
     }
 
     # Degree (outgoing = 1 for each customer i)
     DegreeConstrainOutgoing = {
-        i: model.addConstr(quicksum(X[i, j] for (i, j) in out_arcs[i]) == 1)
+        i: model.addConstr(quicksum(X[i, j] for (_, j) in out_arcs[i]) == 1)
         for i in N
     }
 
@@ -172,11 +169,10 @@ def Run_Model(path, model: Model):
 
                 rhs = len(s) - 2 if stronger else len(s) - 1
                 model.cbLazy(quicksum(X[i, j] for i in s for j in s if (i, j) in X) <= rhs)
-                
     model.optimize(subtour_callback)
 
-    print_solution_summary(model, V_ext, N, R, K, Pr, Dr, X, S, e, l, q, t=t, sink=sink, d=d)
-    
+    print_solution_summary(model, V_ext, R, K, Pr, Dr, X, S, e, l, q, t=t, sink=sink, d=d)
+
 def main(argv=None):
     path, _ = parse_instance_argv(argv, default_filename="l_4_25_4.txt")
     model = Model("MPDTW")

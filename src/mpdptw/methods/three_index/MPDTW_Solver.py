@@ -4,8 +4,6 @@ from mpdptw.common.parsers import build_milp_data
 from gurobipy import *
 
 
-
-
 def Run_Model(inst, model: Model):
     EPS = 1e-6
     # Sets (extended with sink depot)
