@@ -54,7 +54,7 @@ def Run_Model(path, model: Model):
 
     W = Infeasible_Req_Pairs(R, e, l, Pr, Dr_single, c, q, sink, d, Q, inst)
     print(W)
-    
+
     start_nodes = [j for (_, j) in out_arcs[depot] if j != sink]
     # =========================
     # Variables
@@ -118,6 +118,13 @@ def Run_Model(path, model: Model):
                    model.addConstr(S[Dr_single[r]] >= S[i] + d[i] + t[i, Dr_single[r]])
                    for r in R for i in Pr[r]}
     
+    AssignOnlyIfOpen = {
+    (r, k): model.addConstr(Y[r, k] <= Y[k, k])
+    for r in R for k in R
+    }
+
+
+    
     model.optimize()
 
     print_solution_summary(
@@ -129,9 +136,9 @@ def Run_Model(path, model: Model):
     X, Y,           
     S,              
     e, l, q,
-    t=None,
-    sink=None,
-    d=None
+    t,
+    sink,
+    d
     )
 def main(argv=None):
     path, _ = parse_instance_argv(argv, default_filename="l_4_25_4.txt")
