@@ -8,11 +8,15 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
 # Registry: map (method, approach) -> "module.path:callable"
 REGISTRY: Dict[str, Dict[str, str]] = {
     "two_index": {
-        "baseline": "mpdptw.methods.two_index.MPDTW_Solver:main",
+        "baseline": "mpdptw.methods.two_index.MPDTW_Solver_Two:main",
 
     },
     "three_index": {
        "baseline": "mpdptw.methods.three_index.MPDTW_Solver:main", 
+       "extra": "mpdptw.methods.three_index.MPDTW_Solver_Three:main", 
+    },
+    "arf": {
+       "baseline": "mpdptw.methods.arf.MPDTW_Solver_Arf:main", 
     },
 }
 

@@ -90,7 +90,6 @@ def parse_instance_text(text, name="instance"):
     }
 
 def parse_instance_file(filename):
-    print(filename)
     if ("/" in filename) or ("\\" in filename):
         path = filename
     else:
@@ -212,6 +211,9 @@ def build_milp_data(filename, cost_equals_time=True, speed=1.0):
             return False
         if i in deliveries_all and j in pickups_all:
             return False
+        if i == j:
+            return False
+
         return e_ext[i] + d_ext[i] + t_ext[(i, j)] <= l_ext[j]
 
     A_feasible_ext = [(i, j) for (i, j) in A_ext_no_loops if _feasible_arc_ext(i, j)]
@@ -220,7 +222,8 @@ def build_milp_data(filename, cost_equals_time=True, speed=1.0):
     S_minimal_ext = _compute_minimal_S_sets(Pr, Dr_single, sink, start=0)
     e[sink] = e[0]
     l[sink] = l[0]
-    q[sink] = 0
+    d[sink] = 0
+    q[sink] = 0 
     return {
 
         "V": V, "P": P, "D": D, "N": N, "A": A,
