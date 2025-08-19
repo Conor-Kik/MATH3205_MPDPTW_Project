@@ -56,9 +56,11 @@ def Run_Model(inst, model: Model):
     Y = {(r, k): model.addVar(vtype=GRB.BINARY) for r in R for k in K} #1 if request r completed by vehicle k 
     S = {i: model.addVar(vtype=GRB.CONTINUOUS) for i in V}  # continuous service start times
     
+    #NEED TO CHECK WITH BRO HOW R WORKS
+    
     #A is a list of tuples, [(i,j), ...], N = {1, ...., p, p+1, ..., p+n} = P U D
     
-    #A+(i) = set of nodes j such that there is an arc from i to j, all arcs leaving i??>
+    #A+(i) = set of nodes j such that there is an arc from i to j, all arcs leaving i, out arcs
     def A_plus(node):
         nodes_leaving = []
         for (i, j) in A:
@@ -67,7 +69,7 @@ def Run_Model(inst, model: Model):
                 nodes_leaving.append(j)
         return nodes_leaving
     
-    #A-(i) = set of all nodes j such that arc j to i, all arcs entering i
+    #A-(i) = set of all nodes j such that arc j to i, all arcs entering i, in arcs
     def A_minus(node):
         nodes_entering = []
         for (i, j) in A:
@@ -81,76 +83,36 @@ def Run_Model(inst, model: Model):
     model.setObjective(quicksum(quicksum(X[i, j, k] * c[i, j] for (i, j) in A) for k in K), GRB.MINIMIZE)
     
     #Constraints
+    OnlyExitsNodeIfHandlingRequest =  {
+    (k, i): model.addConstr(quicksum(X[i, j, k] for j in A_plus(i)) == Y[R[i], k])
+    for i in N for k in K}
+
+    OnlyEntersNodeIfHandlingRequest =  {
+    (k, i): model.addConstr(quicksum(X[i, j, k] for j in A_minus(i)) == Y[R[i], k])
+    for i in N for k in K}
     
+    EachVehicleOneRouteLeavingOrigin = {k:  model.addConstr(quicksum(X[0,j,k] for j in A_plus(0)) <= 1)
+    for k in K}
     
-    # Decision variables (to be declared in solver)
-    X = {(i, j): model.addVar(vtype=GRB.BINARY) for (i, j) in A}  # binary arc use
-    S = {i: model.addVar(vtype=GRB.CONTINUOUS) for i in V}  # continuous service start times
-    Z = {i : model.addVar(vtype=GRB.CONTINUOUS) for i in N}
-    C = {i : model.addVar(vtype= GRB.CONTINUOUS) for i in N}
+    RequestsHandledByOneVehicle = {r : model.addConstr(quicksum(Y[r,k]) for k in K == 1)
+    for r in R}
     
-    model.setObjective(quicksum(X[i, j] * c[i, j] for (i, j) in A), GRB.MINIMIZE)
-
-    Mq = { (i,j): max(0.0, Q - min(0.0, q[j])) for (i,j) in A if i != depot and j != sink }
-    CapacityFlow = {(i, j):
-                model.addConstr(C[j] >= C[i] + q[j] - Mq[(i,j)]*(1 - X[i,j]))
-                for (i, j) in A if i != depot and j != sink}
-
-    CapacityBounds = {i:
-                      model.addConstr(C[i] <= Q)
-                      for i in N}
-
-    # Degree (incoming = 1 for each customer j)
-    DegreeConstrainIncome = {
-        j: model.addConstr(quicksum(X[i, j] for (i, j) in in_arcs[j]) == 1)
-        for j in N
-    }
-
-    # Degree (outgoing = 1 for each customer i)
-    DegreeConstrainOutgoing = {
-        i: model.addConstr(quicksum(X[i, j] for (i, j) in out_arcs[i]) == 1)
-        for i in N
-    }
-
-    VehicleUsageLimit = model.addConstr(quicksum(X[0, j] for (_,j) in out_arcs[0]) <= len(K))
+    #NO IDEA WHAT M IS An uncapacitated fleet of m identical vehicles in the set K is available to serve the requests.
+    #M is a big enough number and can be set to the maximum return time to the depot b [p+ n +1], which is l
+    #NEED TO ASK HOW l is listed, maybe l[-1] would work????
+    AA = {(i,j): model.addConstr((quicksum(X[i,j,k] - l[sink] for k in K)*(d[i] + t[i][j] + l[sink]) + S[i]) <= S[j]) 
+    for (i,j) in A}
     
-    TimeWindowFeas = {(i, j):
-                      model.addConstr(S[j]>= S[i] + d[i] + t[i, j] - M_ij[i,j]*(1-X[i, j]))
-    for (i, j) in A}
+    StartingServiceTimeLowerBound= {i: model.addConstr(e[i] <= S[i]) 
+    for i in N}
     
-
-    TimeFeasLatest = {i :
-                       model.addConstr(S[i] <= l[i])
-    for i in V}
+    StartingServiceTimeUpperBound= {i: model.addConstr(S[i] <= l[i]) 
+    for i in N}
     
-    TimeFeasEarliest = {i :
-                       model.addConstr(S[i] >= e[i])
-    for i in V}
-
-    RequestPrec = {(i, r):
-                   model.addConstr(S[Dr_single[r]] >= S[i] + d[i] + t[i, Dr_single[r]])
-                   for r in R for i in Pr[r]}
+    StartingServiceTimeOfDeliveryAfterPickupServiceAndTravel = {model.addConstr(d[i] + S[i] + t[i][Dr[r]] <= S[Dr[r]])
+    for r in R for i in Pr}
     
-    PDSameRoute = {(i, r):
-                   model.addConstr(Z[Dr_single[r]] == Z[i])
-    for r in R for i in Pr[r]}
-
-    RouteIdentifier1 = {j:
-                       model.addConstr(Z[j] >= j*X[0, j])
-    for j in start_nodes}
-
-
-    RouteIdentifier2 = {j:
-                       model.addConstr(Z[j] <= j*X[0, j] - len(N)*(X[0, j] -1))
-    for j in start_nodes}
-
-    IndexFoward1 = {(i, j):
-                    model.addConstr(Z[j] >= Z[i] + len(N)*(X[i, j] -1))
-    for i in N for j in N if (i, j) in X}
-
-    IndexFoward2 = {(i, j):
-                    model.addConstr(Z[j] <= Z[i] + len(N)*(1-X[i, j]))
-    for i in N for j in N if (i, j) in X}
+    ##I THINK SI >= 0 is standard
 
     def build_Sset(xvals):
         Sset = set()
