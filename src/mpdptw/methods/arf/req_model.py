@@ -22,8 +22,6 @@ def Infeasible_Req_Pairs(R, e, l, Pr, Dr, c, q, sink, d, Q, inst):
     global_early = e[0]
     global_late = l[0]
 
-    # ---- Helper functions (plain defs, called with explicit arguments) ----
-
     def is_pickup(n, r1, r2):
         """Is node n a pickup of r1 or r2?"""
         return (n in Pr[r1]) or (n in Pr[r2])
