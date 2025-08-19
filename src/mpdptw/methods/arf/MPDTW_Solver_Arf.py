@@ -2,14 +2,11 @@ from mpdptw.common.cli import parse_instance_argv
 from mpdptw.common.two_index_solution_printer import print_solution_summary
 from mpdptw.common.parsers import build_milp_data
 from gurobipy import *
-from mpdptw.methods.arf.req_model import pair_feasible_three_index
+from mpdptw.methods.arf.req_model import pair_feasible
 import itertools
 
 def Infeasible_Req_Pairs(R, e, l, Pr, Dr, c, q, sink, d, Q, inst):
     infeas = set()
-
-    # Pick two request IDs from inst["R"]
-    r1, r2 = inst["R"][0], inst["R"][1]
 
     for r1, r2 in itertools.combinations(R, 2):
 
@@ -85,9 +82,8 @@ def Infeasible_Req_Pairs(R, e, l, Pr, Dr, c, q, sink, d, Q, inst):
             remaining.remove(best)
             curr = best
 
-        # If greedy failed, confirm with full enumeration (slow but exact)
+        # If greedy failed, run small Gurobi Model to confirm
         if not feasible_greedy:
-            PD = (Pr[r1], Dr[r1], Pr[r2], Dr[r2])
             no_feasible_route = Build_infeas_model(r1, r2, inst)
             
             if no_feasible_route:
@@ -98,7 +94,7 @@ def Infeasible_Req_Pairs(R, e, l, Pr, Dr, c, q, sink, d, Q, inst):
 
 def Build_infeas_model(r1, r2, inst):
     model = Model("Pair Check")
-    feasible, work = pair_feasible_three_index(inst, r1, r2, model, output_flag=0)
+    feasible, work = pair_feasible(inst, r1, r2, model, output_flag=0)
     return not feasible
 
 def Run_Model(path, model: Model):

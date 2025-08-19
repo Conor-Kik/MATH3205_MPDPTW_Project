@@ -1,7 +1,7 @@
 from mpdptw.common.two_index_solution_printer import print_solution_summary
 from gurobipy import *
 
-def pair_feasible_three_index(inst, r1, r2, model: Model, output_flag=0):
+def pair_feasible(inst, r1, r2, model: Model, output_flag=0):
     # --- Unpack full instance ---
     Pr_all  = inst["Pr"]
     Dsingle = inst["Dr_single"]
