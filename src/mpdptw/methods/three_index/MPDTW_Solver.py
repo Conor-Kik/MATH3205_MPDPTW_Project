@@ -1,5 +1,5 @@
 from mpdptw.common.cli import parse_instance_argv
-from mpdptw.common.solution_printer import print_solution_summary
+from mpdptw.common.three_index_solution_printer import print_solution_summary
 from mpdptw.common.parsers import build_milp_data
 from gurobipy import *
 
@@ -12,6 +12,7 @@ def Run_Model(inst, model: Model):
     N = inst["N"]
 
     R = inst["R"]  # request ids
+    R_dict = inst["R_dict"]
     Pr = inst["Pr"]  # pickups per request
     Dr = inst["Dr"]  # deliveries per request
     Dr_single = inst["Dr_single"]  # single delivery per request
@@ -48,6 +49,11 @@ def Run_Model(inst, model: Model):
 
     start_nodes = [j for (_, j) in out_arcs[depot] if j != sink]
     
+    print(A)
+    print(K)
+    print(Dr_single)
+    print(Pr)
+    
     ### NEWWWWW
     # Decision variables (to be declared in solver)
     X = {(i, j, k): model.addVar(vtype=GRB.BINARY) for (i, j) in A for k in K}  # binary arc use, 1 if vehicle k goes from i to j
@@ -77,40 +83,46 @@ def Run_Model(inst, model: Model):
         return nodes_entering
     
     
+    node_to_request = {}
+    for rid, nodes in R_dict.items():
+        for i in nodes["pickups"] + nodes["deliveries"]:
+            node_to_request[i] = rid
 
     model.setObjective(quicksum(quicksum(X[i, j, k] * c[i, j] for (i, j) in A) for k in K), GRB.MINIMIZE)
     
     #Constraints
     OnlyExitsNodeIfHandlingRequest =  {
-    (k, i): model.addConstr(quicksum(X[i, j, k] for j in A_plus(i)) == Y[R[i], k])
-    for i in N for k in K}
-
-    OnlyEntersNodeIfHandlingRequest =  {
-    (k, i): model.addConstr(quicksum(X[i, j, k] for j in A_minus(i)) == Y[R[i], k])
+    (i, k): model.addConstr(quicksum(X[i, j, k] for j in A_plus(i)) == Y[node_to_request[i], k])
     for i in N for k in K}
     
-    EachVehicleOneRouteLeavingOrigin = {k:  model.addConstr(quicksum(X[0,j,k] for j in A_plus(0)) <= 1)
+    OnlyEntersNodeIfHandlingRequest =  {
+    (i, k): model.addConstr(quicksum(X[i, j, k] for i in A_minus(j)) == Y[node_to_request[i], k])
+    for i in N for k in K}
+    
+    EachVehicleOneRouteLeavingOrigin = {
+    k:  model.addConstr(quicksum(X[0,j,k] for j in A_plus(0)) <= 1)
     for k in K}
     
-    RequestsHandledByOneVehicle = {r : model.addConstr(quicksum(Y[r,k]) for k in K == 1)
+    RequestsHandledByOneVehicle = {
+    r: model.addConstr(quicksum(Y[r,k] for k in K) == 1)
     for r in R}
     
-    #NO IDEA WHAT M IS An uncapacitated fleet of m identical vehicles in the set K is available to serve the requests.
-    #M is a big enough number and can be set to the maximum return time to the depot b [p+ n +1], which is l
-    #NEED TO ASK HOW l is listed, maybe l[-1] would work????
-    AA = {(i,j): model.addConstr((quicksum(X[i,j,k] - l[sink] for k in K)*(d[i] + t[i][j] + l[sink]) + S[i]) <= S[j]) 
+    ServiceOfNextNodeOnlyAfterServiceAtThisNodeAndTravel = {
+    (i,j): model.addConstr((quicksum(X[i,j,k] - l[sink] for k in K)*(d[i] + t[i,j] + l[sink]) + S[i]) <= S[j]) 
     for (i,j) in A}
     
-    StartingServiceTimeLowerBound= {i: model.addConstr(e[i] <= S[i]) 
+    StartingServiceTimeLowerBound= {
+    i: model.addConstr(e[i] <= S[i]) 
     for i in N}
     
-    StartingServiceTimeUpperBound= {i: model.addConstr(S[i] <= l[i]) 
+    StartingServiceTimeUpperBound= {
+    i: model.addConstr(S[i] <= l[i]) 
     for i in N}
     
-    StartingServiceTimeOfDeliveryAfterPickupServiceAndTravel = {model.addConstr(d[i] + S[i] + t[i][Dr[r]] <= S[Dr[r]])
-    for r in R for i in Pr}
+    ServiceDeliveryNoEarlierThanServiceServiceTimeAndTravel = {(i, r): 
+    model.addConstr(d[i] + S[i] + t[i, Dr_single[r]] <= S[Dr_single[r]])
+    for r in R for i in Pr[r]}
     
-    ##I THINK SI >= 0 is standard
 
     def build_Sset(xvals):
         Sset = set()
@@ -156,7 +168,7 @@ def Run_Model(inst, model: Model):
                 
     model.optimize(subtour_callback)
 
-    print_solution_summary(model, V_ext, N, R, K, Pr, Dr, X, S, e, l, q, t=t, sink=sink, d=d)
+    print_solution_summary(model, V_ext, R, K, Pr, Dr, X, S, e, l, q, t=t, sink=sink, d=d)
 
 def main(argv=None):
     path, _ = parse_instance_argv(argv, default_filename="l_4_25_4.txt")
