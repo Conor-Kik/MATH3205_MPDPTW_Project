@@ -3,8 +3,6 @@ from mpdptw.common.solution_printer import print_solution_summary
 from mpdptw.common.parsers import build_milp_data
 from gurobipy import *
 
-#test
-
 
 def Run_Model(inst, model: Model):
     EPS = 1e-6
