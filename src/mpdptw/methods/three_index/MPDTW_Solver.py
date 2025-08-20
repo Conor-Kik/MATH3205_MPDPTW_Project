@@ -1,5 +1,5 @@
 from mpdptw.common.cli import parse_instance_argv
-from mpdptw.common.three_index_solution_printer import print_solution_summary
+from mpdptw.common.three_index_printer import print_solution_summary
 from mpdptw.common.parsers import build_milp_data
 from gurobipy import *
 
@@ -79,6 +79,7 @@ def Run_Model(inst, model: Model):
                 nodes_entering.append(i)
         return nodes_entering
     
+    print(Q)
     
     node_to_request = {}
     for rid, nodes in R_dict.items():
@@ -105,68 +106,81 @@ def Run_Model(inst, model: Model):
     for r in R}
     
     ServiceOfNextNodeOnlyAfterServiceAtThisNodeAndTravel = {
-    (i,j): model.addConstr((quicksum(X[i,j,k] - l[sink] for k in K)*(d[i] + t[i,j] + l[sink]) + S[i]) <= S[j]) 
+    (i,j): model.addConstr(S[i] + (d[i] + t[i,j] + l[sink])*(quicksum(X[i,j,k] for k in K)) - l[sink] <= S[j])
     for (i,j) in A}
     
     StartingServiceTimeLowerBound= {
     i: model.addConstr(e[i] <= S[i]) 
-    for i in N}
+    for i in V}
     
     StartingServiceTimeUpperBound= {
     i: model.addConstr(S[i] <= l[i]) 
-    for i in N}
+    for i in V}
     
     ServiceDeliveryNoEarlierThanServiceServiceTimeAndTravel = {(i, r): 
     model.addConstr(d[i] + S[i] + t[i, Dr_single[r]] <= S[Dr_single[r]])
     for r in R for i in Pr[r]}
     
-
-    def build_Sset(xvals):
+    
+    def build_Sset(xvals, A, N, K):
         Sset = set()
-        succ =  {}
-        for (i, j) in A:
-            if i in N:
-                if xvals[i, j] > 0.5:
-                    succ[i] = j
-        unvisited = set(N)
 
-        while unvisited:
-            u = unvisited.pop()
-            path = []
-            pos = {}
-            while True:
-                if u not in succ:
-                    break
-                if u in pos:
-                    k = pos[u]
-                    cycle = path[k:]
-                    if len(cycle) >= 2:
-                        Sset.add(frozenset(cycle))
-                    break
-                pos[u] = len(path)
-                path.append(u)
-                unvisited.discard(u)
-                u = succ[u]
+        for k in K:
+            succ = {}                # Successor map for vehicle k
+            for (i, j) in A:
+                if (i, j, k) in xvals and xvals[i, j, k] > 0.5:
+                    succ[i] = j
+
+            unvisited = set(N)
+
+            while unvisited:
+                u = unvisited.pop()
+                path = []
+                pos = {}
+
+                while True:
+                    if u not in succ:
+                        break
+                    if u in pos:
+                        # Cycle detected
+                        cycle_start = pos[u]
+                        cycle = path[cycle_start:]
+                        if len(cycle) >= 2:
+                            Sset.add(frozenset(cycle))
+                        break
+                    pos[u] = len(path)
+                    path.append(u)
+                    unvisited.discard(u)
+                    u = succ[u]
+
         return Sset
 
     def subtour_callback(model, where):
         if where == GRB.Callback.MIPSOL:
             XV = model.cbGetSolution(X)
-            Sset = build_Sset(XV)
-            for s in Sset:
-                stronger = False
-                for r in R:
-                    if all(p in s for p in Pr[r]) and Dr_single[r] not in s:
-                        stronger = True
-                        break
+            for k in K:
+                Sset = build_Sset(XV, A, N, [k])  # Detect subtours for vehicle k
 
-                rhs = len(s) - 2 if stronger else len(s) - 1
-                model.cbLazy(quicksum(X[i, j] for i in s for j in s if (i, j) in X) <= rhs)
-                
+                for s in Sset:
+                    stronger = False
+                    for r in R:
+                        if all(p in s for p in Pr[r]) and Dr_single[r] not in s:
+                            stronger = True
+                            break
+
+                    rhs = len(s) - 2 if stronger else len(s) - 1
+
+                    # Add lazy constraint for this vehicle k
+                    model.cbLazy(
+                        quicksum(X[i, j, k] for i in s for j in s if (i, j, k) in X) <= rhs
+                    )
+
     model.optimize(subtour_callback)
 
     print_solution_summary(model, V_ext, R, K, Pr, Dr, X, S, e, l, q, t=t, sink=sink, d=d)
-
+    
+    print(Q)
+    print(N)
 def main(argv=None):
     path, _ = parse_instance_argv(argv, default_filename="l_4_25_4.txt")
     inst = build_milp_data(str(path))
