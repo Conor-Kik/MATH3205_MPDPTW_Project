@@ -3,7 +3,11 @@ from gurobipy import *
 
 import itertools
 
-def Infeasible_Req_Pairs(R, e, l, Pr, Dr, c, q, sink, d, Q, inst):
+def Infeasible_Req_Pairs(R, e, l, Pr, Dr, c, q, sink, d, Q, inst, output_flag):
+    FN = 0
+    TP = 0
+
+    
     """
     This is a greedy search algorimth that attempts to find a feasible route by
     going to the next legal node with the lowest earliest start time.
@@ -40,6 +44,7 @@ def Infeasible_Req_Pairs(R, e, l, Pr, Dr, c, q, sink, d, Q, inst):
         return (abs(e[n] - global_early) <= EPS) and (abs(l[n] - global_late) <= EPS)
 
     def consider_node(next_node, t_now, i_now, load_now):
+        
         """
         If moving (i_now -> next_node) is feasible, return timing/load info.
         Otherwise return None.
@@ -109,7 +114,7 @@ def Infeasible_Req_Pairs(R, e, l, Pr, Dr, c, q, sink, d, Q, inst):
 
             # -------- Phase 1: non-global pickups → earliest start, tie by finish
             for n in sorted(remaining):
-                if is_pickup(n, r1, r2) and (not is_global_pickup(n, r1, r2)):
+                if is_pickup(n, r1, r2) and ( not is_global_pickup(n, r1, r2) ):
                     info = consider_node(n, current_time, current_node, current_load)
                     if info is None:
                         continue
@@ -165,24 +170,37 @@ def Infeasible_Req_Pairs(R, e, l, Pr, Dr, c, q, sink, d, Q, inst):
 
         # If greedy failed, confirm infeasibility with the small MIP
         if not feasible_greedy:
-            no_feasible_route = Build_infeas_model(r1, r2, inst)
+            no_feasible_route = Build_infeas_model(r1, r2, inst, output_flag)
             if no_feasible_route:
                 infeas.append((r1, r2))
+            else:
+                FN += 1
+        else:
+            TP += 1
+    if output_flag:
+        print("***********************************")
+        print("RECALL OF GREEDY ALGO:", round(TP / (TP + FN),2))
+        print("***********************************")
     return infeas
 
 
-def Build_infeas_model(r1, r2, inst):
+def Build_infeas_model(r1, r2, inst, output_flag):
     """
     Here we build a small model similar to the Two-Index and Three-Index formulations
     This is essentially a brute force way of checking feasiblity if the greedy
     algo fails
     """
     model = Model("Pair Check")
-    feasible, work = pair_feasible(inst, r1, r2, model, output_flag=0)
+    feasible, work = pair_feasible(inst, r1, r2, model, output_flag)
     return not feasible
 
 
-def pair_feasible(inst, r1, r2, model: Model, output_flag=0):
+def pair_feasible(inst, r1, r2, model: Model, output_flag):
+    if output_flag:
+        print("***************************************")
+        print("INITIAL GREEDY FAILED")
+        print(f"NOW CHECKing REQ {r1} {r2} FOR FEASIBILIY")
+        print("***************************************")
     Pr_all  = inst["Pr"]
     Dsingle = inst["Dr_single"]
     Q       = inst["Q"]
@@ -272,8 +290,6 @@ def pair_feasible(inst, r1, r2, model: Model, output_flag=0):
     model.optimize()
 
     feasible = model.status == GRB.OPTIMAL
-
     if output_flag and feasible:
         print_solution_summary(model, V_ext, R, range(1), Pr, Dr, X, S, e, l, q, t=t, sink=sink, d=d)
-
     return feasible, model.Work
