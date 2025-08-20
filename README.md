@@ -62,3 +62,5 @@ This will:
 
 - Always run from the **project root** so paths resolve correctly.
 - The project uses **Gurobi** as the solver, so ensure it is properly installed and licensed.
+
+#LINK: https://docs.google.com/document/d/1jl7S_PJwlgwySusIVRbyNbZ9_U9-sgJS0ANAVPBX3jw/edit?usp=sharing
