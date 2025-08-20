@@ -6,8 +6,9 @@ from mpdptw.methods.arf.req_model import Infeasible_Req_Pairs
 from mpdptw.methods.arf.cluster_assignment import Run_Cluster_Assignment_Model
 import time 
 
-OUTPUT_REQ_MODEL = 0
-OUTPUT_CLUSTER_MODEL = 1
+OUTPUT_REQ_MODEL = 0 # 1 Shows for request pair infeasibility model output
+OUTPUT_CLUSTER_MODEL = 1 # 1 Shows full cluster_model output
+PREPROCESSING_CUTOFF = 10 #Amount of time that cluster assignment model termininates (seconds)
 
 def Run_Model(path, model: Model):
     start = time.perf_counter()
@@ -59,7 +60,7 @@ def Run_Model(path, model: Model):
 
     # Infeasible request pairs, then ordering MIP (returns rank and pos)
     W = Infeasible_Req_Pairs(R, e, l, Pr, Dr_single, c, q, sink, d, Q, inst, output_flag=OUTPUT_REQ_MODEL)
-    rank, pos = Run_Cluster_Assignment_Model(inst, cluster_model, W, outputflag = OUTPUT_CLUSTER_MODEL)  # rank[i] = position, pos[k] = request
+    rank, pos = Run_Cluster_Assignment_Model(inst, cluster_model, W, PREPROCESSING_CUTOFF, outputflag = OUTPUT_CLUSTER_MODEL)  # rank[i] = position, pos[k] = request
 
     # Helpers (depots have no request)
     def req_of(i): 

@@ -56,9 +56,9 @@ def extract_order(U, R):
     return rank, pos
 
 
-def Run_Cluster_Assignment_Model(inst, model: Model, W, outputflag):
+def Run_Cluster_Assignment_Model(inst, model: Model, W, time_limit, outputflag):
     model.setParam("MIPFocus", 1)
-    model.setParam("TimeLimit", 10) 
+    model.setParam("TimeLimit", time_limit) 
     if outputflag:
         print(W)
         print("********************************")
