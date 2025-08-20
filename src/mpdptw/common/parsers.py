@@ -168,6 +168,7 @@ def build_milp_data(filename, cost_equals_time=True, speed=1.0):
     D = inst["D"]
     N = inst["C"]
     R = list(inst["R"].keys())
+    R_dict = inst["R"]
     Pr = {r: list(inst["R"][r]["pickups"])    for r in R}
     Dr = {r: list(inst["R"][r]["deliveries"]) for r in R}
     A = [(i, j) for i in V for j in V]  
@@ -198,9 +199,16 @@ def build_milp_data(filename, cost_equals_time=True, speed=1.0):
     # Single delivery per request (assumed coherent: pick first)
     Dr_single = {r: Dr[r][0] for r in R}
 
-    # Feasible/pruned arcs on extended graph (model-oriented pruning; not input validation)
+
+    # map each node to its request
+    node_to_req = {}
+    for r in R:
+        for p in Pr[r]:
+            node_to_req[p] = r
+        node_to_req[Dr_single[r]] = r
+
     deliveries_all = set(Dr_single.values())
-    pickups_all = {p for r in R for p in Pr[r]}
+    pickups_all    = {p for r in R for p in Pr[r]}
 
     def _feasible_arc_ext(i, j):
         if j == 0 or i == sink:
@@ -209,11 +217,10 @@ def build_milp_data(filename, cost_equals_time=True, speed=1.0):
             return False
         if i in pickups_all and j == 0:
             return False
-        if i in deliveries_all and j in pickups_all:
+        if (i in deliveries_all) and (j in pickups_all) and (node_to_req[i] == node_to_req[j]):
             return False
         if i == j:
             return False
-
         return e_ext[i] + d_ext[i] + t_ext[(i, j)] <= l_ext[j]
 
     A_feasible_ext = [(i, j) for (i, j) in A_ext_no_loops if _feasible_arc_ext(i, j)]
@@ -227,7 +234,7 @@ def build_milp_data(filename, cost_equals_time=True, speed=1.0):
     return {
 
         "V": V, "P": P, "D": D, "N": N, "A": A,
-        "R": R, "Pr": Pr, "Dr": Dr,
+        "R": R, "R_dict": R_dict, "Pr": Pr, "Dr": Dr,
         "K": K, "Q": Q,
         "e": e, "l": l, "d": d, "q": q,
         "t": t, "c": c,

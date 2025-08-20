@@ -8,8 +8,6 @@ def _as_delivery_node(d):
 def _val(v):
     if hasattr(v, "X"):       # Gurobi
         return float(v.X)
-    if hasattr(v, "value"):   # Pyomo/PuLP
-        return float(v.value)
     try:
         return float(v)
     except Exception:
@@ -77,7 +75,6 @@ def _k_available(K):
 def print_solution_summary(
     model,
     V_ext,          # nodes incl. start depot (=0) and sink
-    N,
     R,
     K,
     Pr, Dr,

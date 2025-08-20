@@ -1,9 +1,7 @@
 from mpdptw.common.cli import parse_instance_argv
-from mpdptw.common.solution_printer import print_solution_summary
+from mpdptw.common.three_index_solution_printer import print_solution_summary
 from mpdptw.common.parsers import build_milp_data
 from gurobipy import *
-
-
 
 
 def Run_Model(inst, model: Model):
@@ -14,6 +12,7 @@ def Run_Model(inst, model: Model):
     N = inst["N"]
 
     R = inst["R"]  # request ids
+    R_dict = inst["R_dict"]
     Pr = inst["Pr"]  # pickups per request
     Dr = inst["Dr"]  # deliveries per request
     Dr_single = inst["Dr_single"]  # single delivery per request
@@ -50,15 +49,19 @@ def Run_Model(inst, model: Model):
 
     start_nodes = [j for (_, j) in out_arcs[depot] if j != sink]
     
+    print(A)
+    
     ### NEWWWWW
     # Decision variables (to be declared in solver)
     X = {(i, j, k): model.addVar(vtype=GRB.BINARY) for (i, j) in A for k in K}  # binary arc use, 1 if vehicle k goes from i to j
     Y = {(r, k): model.addVar(vtype=GRB.BINARY) for r in R for k in K} #1 if request r completed by vehicle k 
     S = {i: model.addVar(vtype=GRB.CONTINUOUS) for i in V}  # continuous service start times
     
+    #NEED TO CHECK WITH BRO HOW R WORKS
+    
     #A is a list of tuples, [(i,j), ...], N = {1, ...., p, p+1, ..., p+n} = P U D
     
-    #A+(i) = set of nodes j such that there is an arc from i to j, all arcs leaving i??>
+    #A+(i) = set of nodes j such that there is an arc from i to j, all arcs leaving i, out arcs
     def A_plus(node):
         nodes_leaving = []
         for (i, j) in A:
@@ -67,7 +70,7 @@ def Run_Model(inst, model: Model):
                 nodes_leaving.append(j)
         return nodes_leaving
     
-    #A-(i) = set of all nodes j such that arc j to i, all arcs entering i
+    #A-(i) = set of all nodes j such that arc j to i, all arcs entering i, in arcs
     def A_minus(node):
         nodes_entering = []
         for (i, j) in A:
@@ -77,80 +80,46 @@ def Run_Model(inst, model: Model):
         return nodes_entering
     
     
+    node_to_request = {}
+    for rid, nodes in R_dict.items():
+        for i in nodes["pickups"] + nodes["deliveries"]:
+            node_to_request[i] = rid
 
     model.setObjective(quicksum(quicksum(X[i, j, k] * c[i, j] for (i, j) in A) for k in K), GRB.MINIMIZE)
     
     #Constraints
+    OnlyExitsNodeIfHandlingRequest =  {
+    (i, k): model.addConstr(quicksum(X[i, j, k] for j in A_plus(i)) == Y[node_to_request[i], k])
+    for i in N for k in K}
     
+    OnlyEntersNodeIfHandlingRequest =  {
+    (i, k): model.addConstr(quicksum(X[i, j, k] for i in A_minus(j)) == Y[node_to_request[i], k])
+    for i in N for k in K}
     
-    # Decision variables (to be declared in solver)
-    X = {(i, j): model.addVar(vtype=GRB.BINARY) for (i, j) in A}  # binary arc use
-    S = {i: model.addVar(vtype=GRB.CONTINUOUS) for i in V}  # continuous service start times
-    Z = {i : model.addVar(vtype=GRB.CONTINUOUS) for i in N}
-    C = {i : model.addVar(vtype= GRB.CONTINUOUS) for i in N}
+    EachVehicleOneRouteLeavingOrigin = {
+    k:  model.addConstr(quicksum(X[0,j,k] for j in A_plus(0)) <= 1)
+    for k in K}
     
-    model.setObjective(quicksum(X[i, j] * c[i, j] for (i, j) in A), GRB.MINIMIZE)
-
-    Mq = { (i,j): max(0.0, Q - min(0.0, q[j])) for (i,j) in A if i != depot and j != sink }
-    CapacityFlow = {(i, j):
-                model.addConstr(C[j] >= C[i] + q[j] - Mq[(i,j)]*(1 - X[i,j]))
-                for (i, j) in A if i != depot and j != sink}
-
-    CapacityBounds = {i:
-                      model.addConstr(C[i] <= Q)
-                      for i in N}
-
-    # Degree (incoming = 1 for each customer j)
-    DegreeConstrainIncome = {
-        j: model.addConstr(quicksum(X[i, j] for (i, j) in in_arcs[j]) == 1)
-        for j in N
-    }
-
-    # Degree (outgoing = 1 for each customer i)
-    DegreeConstrainOutgoing = {
-        i: model.addConstr(quicksum(X[i, j] for (i, j) in out_arcs[i]) == 1)
-        for i in N
-    }
-
-    VehicleUsageLimit = model.addConstr(quicksum(X[0, j] for (_,j) in out_arcs[0]) <= len(K))
+    RequestsHandledByOneVehicle = {
+    r: model.addConstr(quicksum(Y[r,k] for k in K) == 1)
+    for r in R}
     
-    TimeWindowFeas = {(i, j):
-                      model.addConstr(S[j]>= S[i] + d[i] + t[i, j] - M_ij[i,j]*(1-X[i, j]))
-    for (i, j) in A}
+    ServiceOfNextNodeOnlyAfterServiceAtThisNodeAndTravel = {
+    (i,j): model.addConstr((quicksum(X[i,j,k] - l[sink] for k in K)*(d[i] + t[i,j] + l[sink]) + S[i]) <= S[j]) 
+    for (i,j) in A}
     
-
-    TimeFeasLatest = {i :
-                       model.addConstr(S[i] <= l[i])
-    for i in V}
+    StartingServiceTimeLowerBound= {
+    i: model.addConstr(e[i] <= S[i]) 
+    for i in N}
     
-    TimeFeasEarliest = {i :
-                       model.addConstr(S[i] >= e[i])
-    for i in V}
-
-    RequestPrec = {(i, r):
-                   model.addConstr(S[Dr_single[r]] >= S[i] + d[i] + t[i, Dr_single[r]])
-                   for r in R for i in Pr[r]}
+    StartingServiceTimeUpperBound= {
+    i: model.addConstr(S[i] <= l[i]) 
+    for i in N}
     
-    PDSameRoute = {(i, r):
-                   model.addConstr(Z[Dr_single[r]] == Z[i])
+    ServiceDeliveryNoEarlierThanServiceServiceTimeAndTravel = {(i, r): 
+    model.addConstr(d[i] + S[i] + t[i, Dr_single[r]] <= S[Dr_single[r]])
     for r in R for i in Pr[r]}
-
-    RouteIdentifier1 = {j:
-                       model.addConstr(Z[j] >= j*X[0, j])
-    for j in start_nodes}
-
-
-    RouteIdentifier2 = {j:
-                       model.addConstr(Z[j] <= j*X[0, j] - len(N)*(X[0, j] -1))
-    for j in start_nodes}
-
-    IndexFoward1 = {(i, j):
-                    model.addConstr(Z[j] >= Z[i] + len(N)*(X[i, j] -1))
-    for i in N for j in N if (i, j) in X}
-
-    IndexFoward2 = {(i, j):
-                    model.addConstr(Z[j] <= Z[i] + len(N)*(1-X[i, j]))
-    for i in N for j in N if (i, j) in X}
+    
 
     def build_Sset(xvals):
         Sset = set()
@@ -196,7 +165,7 @@ def Run_Model(inst, model: Model):
                 
     model.optimize(subtour_callback)
 
-    print_solution_summary(model, V_ext, N, R, K, Pr, Dr, X, S, e, l, q, t=t, sink=sink, d=d)
+    print_solution_summary(model, V_ext, R, K, Pr, Dr, X, S, e, l, q, t=t, sink=sink, d=d)
 
 def main(argv=None):
     path, _ = parse_instance_argv(argv, default_filename="l_4_25_4.txt")
