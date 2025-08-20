@@ -189,7 +189,9 @@ def Run_Model(path, model: Model):
             sink,
             d
         )
-    print(f"PREPROCESSING RUNTIME: {end - start:.2f}\nMODEL RUNTIME: {model.Runtime:.2f}\nTOTAL: {model.Runtime + end - start:.2f} ")
+    print(f"PREPROCESSING RUNTIME: {end - start:.2f}{' - (Cluster Model cutoff activated at ' + str(PREPROCESSING_CUTOFF) + " Seconds)" if (end - start) > PREPROCESSING_CUTOFF else ''}")
+    print(f"MODEL RUNTIME: {model.Runtime:.2f}")
+    print(f"TOTAL: {model.Runtime + end - start:.2f}")
 
 def main(argv=None):
     path, _ = parse_instance_argv(argv, default_filename="l_4_25_4.txt")
