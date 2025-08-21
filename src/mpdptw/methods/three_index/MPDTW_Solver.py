@@ -69,9 +69,6 @@ def Run_Model(inst, model: Model):
         A_plus[i].append((i, j))
         A_minus[j].append((i, j))
     
-    
-    print(Q)
-    
     node_to_request = {}
     for r in R:
         for i in Pr[r] + Dr[r]:
@@ -121,8 +118,6 @@ def Run_Model(inst, model: Model):
 
     print_solution_summary(model, V_ext, R, K, Pr, Dr, X, S, e, l, q, t=t, sink=sink, d=d)
     
-    print(Q)
-    print(N)
 def main(argv=None):
     path, _ = parse_instance_argv(argv, default_filename="l_4_25_4.txt")
     inst = build_milp_data(str(path))
