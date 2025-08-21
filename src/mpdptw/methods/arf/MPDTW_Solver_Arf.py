@@ -2,7 +2,6 @@ from mpdptw.common.cli import parse_instance_argv
 from mpdptw.common.arf_solution_printer import print_solution_summary
 from mpdptw.common.parsers import build_milp_data
 from gurobipy import *
-from mpdptw.methods.arf.req_model import Infeasible_Req_Pairs
 from mpdptw.methods.arf.cluster_assignment import Run_Cluster_Assignment_Model
 import time 
 
@@ -59,7 +58,8 @@ def Run_Model(path, model: Model):
     M_ij = {(i,j): max(0.0, l[i] + d[i] + t[i,j] - e[j]) for (i,j) in A}
 
     # Infeasible request pairs, then ordering MIP (returns rank and pos)
-    W = Infeasible_Req_Pairs(R, e, l, Pr, Dr_single, c, q, sink, d, Q, inst, output_flag=OUTPUT_REQ_MODEL)
+    #W = Infeasible_Req_Pairs(R, e, l, Pr, Dr_single, c, q, sink, d, Q, inst, output_flag=OUTPUT_REQ_MODEL)
+    W = inst["W"]
     rank, pos = Run_Cluster_Assignment_Model(inst, cluster_model, W, PREPROCESSING_CUTOFF, outputflag = OUTPUT_CLUSTER_MODEL)  # rank[i] = position, pos[k] = request
 
     # Helpers (depots have no request)

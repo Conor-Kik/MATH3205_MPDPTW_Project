@@ -2,7 +2,10 @@
 # MPDTW parser
 # ==========================
 from pathlib import Path
+from src.mpdptw.common.W_set_Model import Infeasible_Req_Pairs
 
+
+OUTPUT_W_SET_MODEL = 0
 # ── Line parsers ───────────────────────────────────────────────────────────────
 def _parse_header(line):
     parts = line.strip().split()
@@ -160,6 +163,14 @@ def build_milp_data(filename, cost_equals_time=True, speed=1.0):
     """
     Returns a dictionary .
     """
+    inst = build_dictionary(filename, cost_equals_time=True, speed=1.0)
+
+    #if filename[0] != 'w':
+    W = Infeasible_Req_Pairs(inst, output_flag=OUTPUT_W_SET_MODEL)
+    inst["W"] = W
+    return inst
+
+def build_dictionary(filename, cost_equals_time=True, speed=1.0):
     inst = parse_instance_file(filename)
 
     # Sets
@@ -224,7 +235,7 @@ def build_milp_data(filename, cost_equals_time=True, speed=1.0):
         return e_ext[i] + d_ext[i] + t_ext[(i, j)] <= l_ext[j]
 
     A_feasible_ext = [(i, j) for (i, j) in A_ext_no_loops if _feasible_arc_ext(i, j)]
-
+    
     # Minimal S-sets (one per request)
     S_minimal_ext = _compute_minimal_S_sets(Pr, Dr_single, sink, start=0)
     e[sink] = e[0]
@@ -232,7 +243,7 @@ def build_milp_data(filename, cost_equals_time=True, speed=1.0):
     d[sink] = 0
     q[sink] = 0 
     return {
-
+        "Nodes_To_Reqs" : node_to_req, 
         "V": V, "P": P, "D": D, "N": N, "A": A,
         "R": R, "R_dict": R_dict, "Pr": Pr, "Dr": Dr,
         "K": K, "Q": Q,

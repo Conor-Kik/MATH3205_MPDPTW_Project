@@ -1,13 +1,22 @@
 from mpdptw.common.two_index_solution_printer import print_solution_summary
 from gurobipy import *
-
+import math
 import itertools
 
-def Infeasible_Req_Pairs(R, e, l, Pr, Dr, c, q, sink, d, Q, inst, output_flag):
+def Infeasible_Req_Pairs(inst, output_flag=0):
     FN = 0
     TP = 0
-
-    
+    TN = 0 
+    Dr = inst["Dr_single"]
+    R = inst["R"]
+    Q = inst["Q"]
+    c = inst["c"]
+    e = inst["e"]
+    l = inst["l"]
+    Pr = inst["Pr"]
+    sink = inst["sink"]
+    q = inst["q"]
+    d = inst["d"]
     """
     This is a greedy search algorimth that attempts to find a feasible route by
     going to the next legal node with the lowest earliest start time.
@@ -100,7 +109,7 @@ def Infeasible_Req_Pairs(R, e, l, Pr, Dr, c, q, sink, d, Q, inst, output_flag):
                 if (current_node, sink) not in A:
                     feasible_greedy = False
                     break
-                arrival_to_sink = current_time + c[current_node, sink]
+                arrival_to_sink = current_time + c[current_node, 0]
                 start_at_sink = max(arrival_to_sink, e[sink])
                 feasible_greedy = (start_at_sink <= l[sink] + EPS)
                 break  
@@ -173,13 +182,18 @@ def Infeasible_Req_Pairs(R, e, l, Pr, Dr, c, q, sink, d, Q, inst, output_flag):
             no_feasible_route = Build_infeas_model(r1, r2, inst, output_flag)
             if no_feasible_route:
                 infeas.append((r1, r2))
+                TN += 1
             else:
                 FN += 1
         else:
             TP += 1
     if output_flag:
+        RECALL = TP / (TP + FN)
         print("***********************************")
-        print("RECALL OF GREEDY ALGO:", round(TP / (TP + FN),2))
+        print("RECALL OF GREEDY ALGO:", round(RECALL,2))
+        print("F1 METRIC", round((2*RECALL)/(1+RECALL),2))
+        print("BALANCED ACCURACY", round((RECALL+1)/(2),2))
+        print(f"PROPORTION OF PAIRS THAT ARE INFEAS: {round(TN/(math.comb(len(R), 2)),2)}")
         print("***********************************")
     return infeas
 
