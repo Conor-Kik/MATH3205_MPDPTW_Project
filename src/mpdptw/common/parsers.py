@@ -164,11 +164,20 @@ def build_milp_data(filename, cost_equals_time=True, speed=1.0):
     Returns a dictionary .
     """
     inst = build_dictionary(filename, cost_equals_time=True, speed=1.0)
-
+    r = inst["Nodes_To_Reqs"]
+    A_feas = inst["A_feasible_ext"]
+    sink = inst["sink"]
     #if filename[0] != 'w':
     W = Infeasible_Req_Pairs(inst, output_flag=OUTPUT_W_SET_MODEL)
     inst["W"] = W
+    inst["A_feasible_ext"] = [
+        (i, j) for (i, j) in A_feas
+        if (r[i], r[j]) not in W and (r[j], r[i]) not in W
+    ]
+    print(f"ARCS CUTS: {len(inst["A"]) - len(inst["A_feasible_ext"])}")
     return inst
+
+
 
 def build_dictionary(filename, cost_equals_time=True, speed=1.0):
     inst = parse_instance_file(filename)
@@ -217,6 +226,8 @@ def build_dictionary(filename, cost_equals_time=True, speed=1.0):
         for p in Pr[r]:
             node_to_req[p] = r
         node_to_req[Dr_single[r]] = r
+    node_to_req[0] = None
+    node_to_req[sink] = None
 
     deliveries_all = set(Dr_single.values())
     pickups_all    = {p for r in R for p in Pr[r]}
