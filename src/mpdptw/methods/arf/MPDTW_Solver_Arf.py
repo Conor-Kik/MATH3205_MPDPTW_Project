@@ -4,6 +4,8 @@ from mpdptw.common.parsers import build_milp_data
 from gurobipy import *
 from mpdptw.methods.arf.cluster_assignment import Run_Cluster_Assignment_Model
 import time 
+from mpdptw.common.big_M import tight_bigM
+
 
 OUTPUT_REQ_MODEL = 0 # 1 Shows for request pair infeasibility model output
 OUTPUT_CLUSTER_MODEL = 1 # 1 Shows full cluster_model output
@@ -55,8 +57,8 @@ def Run_Model(path, model: Model):
     sink = inst["sink"]            # sink depot
 
     # Big-M per arc (tight)
-    M_ij = {(i,j): max(0.0, l[i] + d[i] + t[i,j] - e[j]) for (i,j) in A}
-
+    #M_ij = {(i,j): max(0.0, l[i] + d[i] + t[i,j] - e[j]) for (i,j) in A}
+    M_ij, Earliest, Latest = tight_bigM(out_arcs, t, d, V, A, sink, e, l)
     # Infeasible request pairs, then ordering MIP (returns rank and pos)
     #W = Infeasible_Req_Pairs(R, e, l, Pr, Dr_single, c, q, sink, d, Q, inst, output_flag=OUTPUT_REQ_MODEL)
     W = inst["W"]
@@ -82,7 +84,7 @@ def Run_Model(path, model: Model):
     Y = {(r, k): model.addVar(vtype=GRB.BINARY)
          for r in R for k in R if rank[r] >= k}
 
-    S = {i: model.addVar(vtype=GRB.CONTINUOUS) for i in V}
+    S = {i: model.addVar(vtype=GRB.CONTINUOUS, lb=Earliest[i], ub=Latest[i]) for i in V}
     
     # =========================
     # Objective
@@ -163,9 +165,10 @@ def Run_Model(path, model: Model):
         if any((i, j, k) in X for k in R)
     }
     # Time windows
-    TimeFeasLatest = {i: model.addConstr(S[i] <= l[i]) for i in V}
-    TimeFeasEarliest = {i: model.addConstr(S[i] >= e[i]) for i in V}
-
+    #TimeFeasLatest = {i: model.addConstr(S[i] <= l[i]) for i in V}
+    #TimeFeasEarliest = {i: model.addConstr(S[i] >= e[i]) for i in V}
+    TimeFeasEarliest = {i: model.addConstr(S[i] >= Earliest[i]) for i in V}
+    TimeFeasLatest   = {i: model.addConstr(S[i] <= Latest[i])   for i in V}
     # Precedence within each request: pickups before its delivery
     RequestPrec = {
         (i, r): model.addConstr(S[Dr_single[r]] >= S[i] + d[i] + t[i, Dr_single[r]])
