@@ -3,7 +3,7 @@ from mpdptw.common.two_index_solution_printer import print_solution_summary
 from mpdptw.common.parsers import build_milp_data
 from gurobipy import *
 import re 
-
+from mpdptw.methods.two_index.big_M import tight_bigM
 
 def Run_Model(path, model: Model):
     inst = build_milp_data(str(path))
@@ -54,7 +54,8 @@ def Run_Model(path, model: Model):
     # Special nodes
     depot = inst["depot"]  # start depot (0)
     sink = inst["sink"]  # sink depot
-    M_ij = {(i,j): max(0.0, l[i] + d[i] + t[i,j] - e[j]) for (i,j) in A}
+    #M_ij = {(i,j): max(0.0, l[i] + d[i] + t[i,j] - e[j]) for (i,j) in A}
+    M_ij, Earliest, Latest = tight_bigM(out_arcs, t, d, V, A, sink, e, l)
 
 
     start_nodes = [j for (_, j) in out_arcs[depot] if j != sink]
@@ -88,20 +89,26 @@ def Run_Model(path, model: Model):
         for i in N
     }
 
+    DepotBalance =  model.addConstr(
+        quicksum(X[i, sink] for (i, _) in in_arcs[sink])
+        == quicksum(X[0, j] for (_, j) in out_arcs[0])
+    )
+
+    TimeWindowFeas = {
+        (i,j): model.addConstr(S[j] >= S[i] + d[i] + t[i,j] - M_ij[i,j] * (1 - X[i,j]))
+        for (i,j) in A
+    }
+    TimeFeasEarliest = {i: model.addConstr(S[i] >= Earliest[i]) for i in V}
+    TimeFeasLatest   = {i: model.addConstr(S[i] <= Latest[i])   for i in V}
+
     VehicleUsageLimit = model.addConstr(quicksum(X[0, j] for (_,j) in out_arcs[0]) <= len(K))
     
-    TimeWindowFeas = {(i, j):
-                      model.addConstr(S[j]>= S[i] + d[i] + t[i, j] - M_ij[i,j]*(1-X[i, j]))
-    for (i, j) in A}
+    #TimeWindowFeas = {(i, j): model.addConstr(S[j]>= S[i] + d[i] + t[i, j] - M_ij[i,j]*(1-X[i, j])) for (i, j) in A}
     
 
-    TimeFeasLatest = {i :
-                       model.addConstr(S[i] <= l[i])
-    for i in V}
+    #TimeFeasLatest = {i : model.addConstr(S[i] <= l[i]) for i in V}
     
-    TimeFeasEarliest = {i :
-                       model.addConstr(S[i] >= e[i])
-    for i in V}
+    #TimeFeasEarliest = {i : model.addConstr(S[i] >= e[i]) for i in V}
 
     RequestPrec = {(i, r):
                    model.addConstr(S[Dr_single[r]] >= S[i] + d[i] + t[i, Dr_single[r]])
