@@ -3,7 +3,7 @@ from mpdptw.common.two_index_solution_printer import print_solution_summary
 from mpdptw.common.parsers import build_milp_data
 from gurobipy import *
 import re 
-from mpdptw.methods.two_index.big_M import tight_bigM
+from mpdptw.common.big_M import tight_bigM
 
 def Run_Model(path, model: Model):
     inst = build_milp_data(str(path))
@@ -61,8 +61,8 @@ def Run_Model(path, model: Model):
     start_nodes = [j for (_, j) in out_arcs[depot] if j != sink]
     # Decision variables (to be declared in solver)
     X = {(i, j): model.addVar(vtype=GRB.BINARY) for (i, j) in A}  # binary arc use
-    S = {i: model.addVar(vtype=GRB.CONTINUOUS) for i in V}  # continuous service start times
-    Z = {i : model.addVar(vtype=GRB.CONTINUOUS) for i in N}
+    S = {i: model.addVar(vtype=GRB.CONTINUOUS, lb=Earliest[i], ub=Latest[i]) for i in V}  # continuous service start times
+    Z = {i : model.addVar(vtype=GRB.CONTINUOUS, lb=0, ub=len(N)) for i in N}
     
 
     if  Request_Length == 8:
@@ -137,11 +137,14 @@ def Run_Model(path, model: Model):
 
     def build_Sset(xvals):
         Sset = set()
-        succ =  {}
-        for (i, j) in A:
-            if i in N:
-                if xvals[i, j] > 0.5:
-                    succ[i] = j
+        succ = {}
+        for i in N:
+            outs = [(j, xvals.get((i, j), 0.0)) for (ii, j) in A if ii == i and j in N]
+            if not outs:
+                continue
+            j_best, v_best = max(outs, key=lambda z: z[1])
+            if v_best >= 1.0 - EPS:
+                succ[i] = j_best
         unvisited = set(N)
 
         while unvisited:
@@ -166,6 +169,7 @@ def Run_Model(path, model: Model):
     def subtour_callback(model, where):
         if where == GRB.Callback.MIPSOL:
             XV = model.cbGetSolution(X)
+            #print(XV)
             Sset = build_Sset(XV)
             for s in Sset:
                 stronger = False

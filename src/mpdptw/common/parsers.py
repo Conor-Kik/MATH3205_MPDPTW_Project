@@ -174,8 +174,15 @@ def build_milp_data(filename, cost_equals_time=True, speed=1.0):
         (i, j) for (i, j) in A_feas
         if (r[i], r[j]) not in W and (r[j], r[i]) not in W
     ]
-    print(f"ARCS CUTS: {len(inst["A"]) - len(inst["A_feasible_ext"])}")
+    print(f"-----------\nARCS CUTS: {len(inst["A"]) - len(inst["A_feasible_ext"])}\n-----------")
     return inst
+
+
+
+
+
+
+
 
 
 
