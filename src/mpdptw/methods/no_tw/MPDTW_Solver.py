@@ -5,12 +5,10 @@ from gurobipy import *
 from mpdptw.methods.arf.cluster_assignment import Run_Cluster_Assignment_Model
 from mpdptw.methods.no_tw.warm_start import warm_start_solution
 from collections import defaultdict
-from mpdptw.methods.no_tw.backup import Run_Models
 OUTPUT_REQ_MODEL = 0 # 1 Shows for request pair infeasibility model output
 OUTPUT_CLUSTER_MODEL = 0 # 1 Shows full cluster_model output
 PREPROCESSING_CUTOFF = 10 #Amount of time that cluster assignment model termininates (seconds)
-PLOT_CLUSTERS = 1 
-
+PLOT_CLUSTERS = 1 #1 Show plot of warm_start prediction
 
 def Run_Model(path, model: Model):
     inst = build_milp_data(str(path))
@@ -55,28 +53,27 @@ def Run_Model(path, model: Model):
 
     def req_of(i):
         return inverse_request_map.get(i, None)
-
     def allowed_in_cluster(i, k):
         ri = req_of(i)
-        return True if ri is None else (r >= k) 
+        return True if ri is None else (rank[ri] >= k)
+
 
 
     # Heuristic warm start
-    init_sol, total_cost = warm_start_solution(inst, plot_clusters=PLOT_CLUSTERS)
+    init_sol, total_cost, clusters_to_reqs = warm_start_solution(inst, plot_clusters=PLOT_CLUSTERS)
     used_labels = {k_lbl for (_, _), k_lbl in init_sol.items()}
-
     # Rank/position model for cluster ordering
     rank, pos = Run_Cluster_Assignment_Model(
         inst, cluster_model, None, PREPROCESSING_CUTOFF, outputflag=OUTPUT_CLUSTER_MODEL
     )
-
     # Variables
     X = {(i, j, k): model.addVar(vtype=GRB.BINARY)
          for (i, j) in A for k in R
          if allowed_in_cluster(i, k) and allowed_in_cluster(j, k)}
-
     Y = {(r, k): model.addVar(vtype=GRB.BINARY)
          for r in R for k in R if rank[r] >= k}
+    
+    
 
     # Map warm-start arcs to request sets per route label
     route_req = {}
@@ -139,17 +136,7 @@ def Run_Model(path, model: Model):
     # Objective
     model.setObjective(quicksum(c[i, j] * X[i, j, k] for (i, j, k) in X), GRB.MINIMIZE)
 
-    # Closure: delivery can only depart if all pickups of its request depart (per k)
-    Closure_DelivOutBound = {}
-    for r in R:
-        dl = Dr_single[r]
-        for k in R:
-            deliv_out = quicksum(X[dl, j, k] for (_, j) in out_arcs[dl] if (dl, j, k) in X)
-            pickups_out = quicksum(
-                X[p, j, k] for p in Pr[r] for (_, j) in out_arcs[p] if (p, j, k) in X
-            )
-            if deliv_out.size() > 0:
-                Closure_DelivOutBound[(r, k)] = model.addConstr(deliv_out <= pickups_out)
+
 
     # Degree/linking per customer node i and position k
     DegreeConstrainIncome = {
@@ -188,14 +175,6 @@ def Run_Model(path, model: Model):
         for k in R
     }
 
-    # At most one departure from depot per cluster position k
-    DepotCluster = {
-        k: model.addConstr(
-            quicksum(X[(depot, j, k)] for (_, j) in out_arcs[depot] if (depot, j, k) in X) <= 1
-        )
-        for k in R
-    }
-
     # Each request assigned exactly once
     RequestAssigned = {
         r: model.addConstr(quicksum(Y[r, k] for k in R if (r, k) in Y) == 1)
@@ -207,49 +186,64 @@ def Run_Model(path, model: Model):
         quicksum(Y[pos[k], k] for k in R if (pos[k], k) in Y) <= len(K)
     )
 
-    # MTZ order variables per node and cluster/position
-    U = {(i, k): model.addVar(vtype=GRB.CONTINUOUS, lb=0.0, ub=len(N))
-         for i in N for k in R}
 
-    # MTZ precedence (pickup → delivery), deactivated if Y[r,k]=0
-    M_MTZ = len(N)
-    for r in R:
-        dl = Dr_single[r]
-        for p in Pr[r]:
-            for k in R:
-                if (r, k) in Y and (p, k) in U and (dl, k) in U:
-                    model.addConstr(U[dl, k] >= U[p, k] + 1 - M_MTZ * (1 - Y[r, k]))
+    model._prefix_seen = set()   
+    model._route_seen  = set()   
+    model._sec_seen = set()
 
-    # Link U to activity; cap at 0 if (ri,k) not in Y
-    for i in N:
-        ri = inverse_request_map[i]
-        for k in R:
-            if (ri, k) in Y:
-                model.addConstr(U[i, k] <= M_MTZ * Y[ri, k])
-            else:
-                model.addConstr(U[i, k] <= 0)
+    def _components_for_cluster(k, xvals, X, depot, sink, N):
+        adj = defaultdict(set)
+        nodes = set()
+        for (i, j, kk) in X.keys():
+            if kk != k:
+                continue
+            if xvals.get((i, j, k), 0.0) <= 0.5:
+                continue
+            if i in (depot, sink) or j in (depot, sink):
+                continue  # internal components only
+            if i not in N or j not in N:
+                continue
+            nodes.add(i); nodes.add(j)
+            adj[i].add(j); adj[j].add(i)
 
-    # MTZ core inequalities (within customer nodes)
-    for k in R:
-        for (i, j) in A:
-            if i in N and j in N and i != j and (i, j, k) in X:
-                model.addConstr(U[j, k] >= U[i, k] + 1 - M_MTZ * (1 - X[i, j, k]))
+        Sset, seen = [], set()
+        for v in nodes:
+            if v in seen: 
+                continue
+            stack, comp = [v], set()
+            while stack:
+                u = stack.pop()
+                if u in seen: 
+                    continue
+                seen.add(u); comp.add(u)
+                for w in adj[u]:
+                    if w not in seen:
+                        stack.append(w)
+            if len(comp) >= 2:
+                Sset.append(comp)
+        return Sset
+    
 
-    # Anchor first internal step after depot
-    for k in R:
-        for (_, j) in out_arcs[depot]:
-            if j in N and (depot, j, k) in X:
-                model.addConstr(U[j, k] >= 1 * X[depot, j, k])
-
-    best_obj = float('inf')
-
-    model.Params.LazyConstraints = 1
     def lazy_cb(model, where):
         if where != GRB.Callback.MIPSOL:
             return
 
         XV = model.cbGetSolution(X)
         YV = model.cbGetSolution(Y)
+        for k in R:
+            Sset = _components_for_cluster(k, XV, X, depot, sink, N)
+            for s in Sset:
+                key = (k, frozenset(s))
+                if key in model._sec_seen:
+                    continue
+                lhs_vars = [X[i, j, k] for i in s for j in s if (i, j, k) in X]
+                if not lhs_vars:
+                    continue
+                lhs_val = sum(XV[i, j, k] for i in s for j in s if (i, j, k) in X)
+                rhs = len(s) - 1
+                if lhs_val > rhs + 1e-9:
+                    model._sec_seen.add(key)
+                    model.cbLazy(quicksum(lhs_vars) <= rhs)
 
         for k in R:
             active = YV.get((pos.get(k), k), 0.0) > 0.5 or any(
@@ -262,9 +256,10 @@ def Run_Model(path, model: Model):
             if not assigned:
                 continue
 
-            # Follow incumbent route and accumulate duration
+            # --- Reconstruct incumbent route (and record nodes) ---
             node, seen, duration, ok = depot, {depot}, 0.0, False
-            for _ in range(10000):
+            route = [depot]  
+            for _ in range(len(V) + 1):
                 candidates = [
                     j for (_, j) in out_arcs[node]
                     if (node, j, k) in X and XV.get((node, j, k), 0.0) > 0.5
@@ -275,6 +270,7 @@ def Run_Model(path, model: Model):
                 j = candidates[0]
                 duration += d.get(node, 0.0) + t[node, j]
                 node = j
+                route.append(node)   # <--- track
                 if node == sink:
                     ok = True
                     break
@@ -282,9 +278,61 @@ def Run_Model(path, model: Model):
                     ok = False
                     break
                 seen.add(node)
+            
+            # --- Precedence no-good cuts: if a delivery appears before its pickups ---
+            # Use route even if 'ok' is False (we can still cut the bad prefix/route)
+            if len(route) >= 2:
+                posr = {v: i for i, v in enumerate(route)}
+                violating = None  # (r_bad, dnode_idx)
+                for r in R:
+                    dnode = Dr_single[r]
+                    if dnode not in posr:
+                        continue
+                    idx_d = posr[dnode]
+                    # any pickup of r AFTER the delivery?
+                    if any((p in posr) and (posr[p] > idx_d) for p in Pr[r]):
+                        violating = (r, idx_d)
+                        break
+
+                if violating is not None:
+                    r_bad, idx_d = violating
+
+                    # 1) Prefix no-good: forbid reusing the exact prefix up to dnode
+                    prefix_nodes = route[:idx_d+1]     # [depot, ..., pred, dnode]
+                    prefix_arcs = []
+                    for a in range(len(prefix_nodes)-1):
+                        i, j = prefix_nodes[a], prefix_nodes[a+1]
+                        if (i, j, k) in X:
+                            prefix_arcs.append((i, j))
+                    if prefix_arcs:
+                        key_pref = (k, tuple(prefix_arcs))
+                        if key_pref not in model._prefix_seen:
+                            model._prefix_seen.add(key_pref)
+                            model.cbLazy(quicksum(X[i, j, k] for (i, j) in prefix_arcs)
+                                        <= len(prefix_arcs) - 1)
+                            continue
+                        else:
+                            print("seen")
+
+                    # 2) 
+                    route_arcs = []
+                    for a in range(len(route)-1):
+                        i, j = route[a], route[a+1]
+                        if (i, j, k) in X:
+                            route_arcs.append((i, j))
+                    if route_arcs:
+                        key_route = (k, frozenset(route_arcs))
+                        if key_route not in model._route_seen:
+                            model._route_seen.add(key_route)
+                            model.cbLazy(quicksum(X[i, j, k] for (i, j) in route_arcs)
+                                        <= len(route_arcs) - 1)
+                            continue
+
+
 
             if ok and duration > l[depot] + 1e-6:
                 model.cbLazy(quicksum(Y[(r, k)] for r in assigned) <= len(assigned) - 1)
+
 
     def report_objective(m: Model):
         st = m.Status
@@ -311,10 +359,9 @@ def Run_Model(path, model: Model):
             print("Model is infeasible/unbounded/inf_or_unbd.")
         print(f"Runtime           : {m.Runtime:.2f}s")
         print(f"SolCount          : {m.SolCount}, Nodes: {getattr(m, 'NodeCount', 'n/a')}")
-
+    model.Params.LazyConstraints = 1
     model.optimize(lazy_cb)
     report_objective(model)
-
     print_solution_summary(
         model,
         V_ext,
@@ -322,14 +369,12 @@ def Run_Model(path, model: Model):
         K,
         Pr, Dr,
         X, Y,
-        U,
+        None,
         e, l, q,
         t,
         sink,
         d
     )
-
-
 
 def main(argv=None):
     path, _ = parse_instance_argv(argv, default_filename="l_4_25_4.txt")

@@ -282,7 +282,7 @@ def warm_start_solution(inst, plot_clusters = 0):
         print(f"Total cost of all routes = {total_cost:.6f}")
         for rid in sorted(route_to_reqs):
             print(f"Route {rid}: requests={route_to_reqs[rid]}  |  finish time={route_to_costs[rid]:.6f}")
-        return arc_to_route, total_cost
+        return arc_to_route, total_cost, route_to_reqs
 
 
 def plot_cluster_labels(prelabel, kept_R, inst,

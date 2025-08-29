@@ -73,7 +73,7 @@ def Run_Model(path, model: Model):
         return True if ri is None else (rank[ri] >= k)
 
     start_nodes = [j for (_, j) in out_arcs[depot] if j != sink]
-
+    nodes_per_req = {r: len(Pr[r]) + len(Dr[r]) for r in R}   # usually len(Dr[r]) = 1
     # =========================
     # Variables
     # =========================
@@ -85,13 +85,11 @@ def Run_Model(path, model: Model):
          for r in R for k in R if rank[r] >= k}
 
     S = {i: model.addVar(vtype=GRB.CONTINUOUS, lb=Earliest[i], ub=Latest[i]) for i in V}
-    
     # =========================
     # Objective
     # =========================
     # Sum only over existing X keys
     model.setObjective(quicksum(c[i, j] * X[i, j, k] for (i, j, k) in X), GRB.MINIMIZE)
-    
     # =========================
     # ARF/cluster-model linkage 
     # =========================
@@ -103,7 +101,6 @@ def Run_Model(path, model: Model):
             quicksum(Y[r, k] for r in R if rank[r] > k and (r, k) in Y)
             <= (n - 1 - k) * Y[rk, k]
         )
-
     # =========================
     # Constraints
     # =========================
@@ -126,8 +123,26 @@ def Run_Model(path, model: Model):
         )
         for i in N for k in R
     }
+    StartEq = {
+        k: model.addConstr(
+            quicksum(X[(depot, j, k)] for (_, j) in out_arcs[depot] if (depot, j, k) in X)
+            ==
+            (Y[(pos[k], k)] if (pos[k], k) in Y else 0),
+            name=f"start_eq[{k}]"
+        )
+        for k in R
+    }
 
-    # At most one departure from depot per cluster/position k
+    EndEq = {
+        k: model.addConstr(
+            quicksum(X[(i, sink, k)] for (i, _) in in_arcs[sink] if (i, sink, k) in X)
+            ==
+            (Y[(pos[k], k)] if (pos[k], k) in Y else 0),
+            name=f"end_eq[{k}]"
+        )
+        for k in R
+    }
+        # At most one departure from depot per cluster/position k
     DepotCluster = {
         k: model.addConstr(
             quicksum(X[(depot, j, k)] for (_, j) in out_arcs[depot] if (depot, j, k) in X) <= 1
@@ -158,11 +173,11 @@ def Run_Model(path, model: Model):
     # =========================
     # Big-M with active clusters for (i,j): only if there exists any k with X[i,j,k]
     TimeWindowFeas = {
-        (i, j): model.addConstr(
-            S[j] >= S[i] + d[i] + t[i, j] - M_ij[i, j] * (1 - quicksum(X[i, j, k] for k in R if (i, j, k) in X))
+        (i, j,k): model.addConstr(
+            S[j] >= S[i] + d[i] + t[i, j] - M_ij[i, j] * (1 - X[i, j, k])
         )
-        for (i, j) in A
-        if any((i, j, k) in X for k in R)
+        for (i, j) in A for k in R
+        if (i, j, k) in X
     }
     # Time windows
     #TimeFeasLatest = {i: model.addConstr(S[i] <= l[i]) for i in V}
@@ -174,6 +189,8 @@ def Run_Model(path, model: Model):
         (i, r): model.addConstr(S[Dr_single[r]] >= S[i] + d[i] + t[i, Dr_single[r]])
         for r in R for i in Pr[r]
     }
+
+    
     end = time.perf_counter()
     # Optimize & print
     model.optimize()
