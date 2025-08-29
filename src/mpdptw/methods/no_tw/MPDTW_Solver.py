@@ -5,60 +5,65 @@ from gurobipy import *
 from mpdptw.methods.arf.cluster_assignment import Run_Cluster_Assignment_Model
 from mpdptw.methods.no_tw.warm_start import warm_start_solution
 from collections import defaultdict
-
+from mpdptw.methods.no_tw.backup import Run_Models
 OUTPUT_REQ_MODEL = 0 # 1 Shows for request pair infeasibility model output
 OUTPUT_CLUSTER_MODEL = 0 # 1 Shows full cluster_model output
 PREPROCESSING_CUTOFF = 10 #Amount of time that cluster assignment model termininates (seconds)
-PLOT_CLUSTERS = 1
+PLOT_CLUSTERS = 0
+
+
 def Run_Model(path, model: Model):
     inst = build_milp_data(str(path))
     cluster_model = Model("Optimal Cluster Assignment")
 
-    # Sets / data
-    V      = inst["V_ext"]
-    A      = inst["A_feasible_ext"]
-    N      = inst["N"]
-    R      = inst["R"]
-    Pr     = inst["Pr"]
-    Dr     = inst["Dr"]
-    Dr_single = inst["Dr_single"]
+    # Instance data
+    V        = inst["V_ext"]
+    A        = inst["A_feasible_ext"]
+    N        = inst["N"]
+    R        = inst["R"]
+    Pr       = inst["Pr"]
+    Dr       = inst["Dr"]
+    Dr_single= inst["Dr_single"]
 
-    K      = inst["K"]
+
+    K        = inst["K"]
+    Q        = inst["Q"]
     nodes_to_reqs = inst["Nodes_To_Reqs"]
-    e      = inst["e"]
-    l      = inst["l"]
-    d      = inst["d"]
-    q      = inst["q"]
-    t      = inst["t_ext"]
-    c      = inst["c_ext"]
-    V_ext  = inst["V_ext"]
+    e        = inst["e"]
+    l        = inst["l"]
+    d        = inst["d"]
+    q        = inst["q"]
+    t        = inst["t_ext"]
+    c        = inst["c_ext"]
+    V_ext    = inst["V_ext"]
 
-    depot  = inst["depot"]
-    sink   = inst["sink"]
+    depot    = inst["depot"]
+    sink     = inst["sink"]
 
-    # Adjacency lists
-    in_arcs  = {j: [] for j in V}
-    out_arcs = {i: [] for i in V}
+    # Adjacency
+    in_arcs, out_arcs = {j: [] for j in V}, {i: [] for i in V}
     for (i, j) in A:
         out_arcs[i].append((i, j))
         in_arcs[j].append((i, j))
 
-    # Node→request map
+    # Node → request
     inverse_request_map = {}
     for r in R:
         for i in Pr[r] + Dr[r]:
             inverse_request_map[i] = r
 
+
     def req_of(i):
         return inverse_request_map.get(i, None)
+
     def allowed_in_cluster(i, k):
         ri = req_of(i)
-        return True if ri is None else (rank[ri] >= k)
+        return True if ri is None else (r >= k)  # NOTE: intentional; do not change
 
 
-    # Warm-start with ALNS
+    # Heuristic warm start
     init_sol, total_cost = warm_start_solution(inst, plot_clusters=PLOT_CLUSTERS)
-    model.setParam("Cutoff", total_cost)
+    used_labels = {k_lbl for (_, _), k_lbl in init_sol.items()}
 
     # Rank/position model for cluster ordering
     rank, pos = Run_Cluster_Assignment_Model(
@@ -73,17 +78,19 @@ def Run_Model(path, model: Model):
     Y = {(r, k): model.addVar(vtype=GRB.BINARY)
          for r in R for k in R if rank[r] >= k}
 
-    # Warm-start X/Y from heuristic routes, respecting rank-domain
+    # Map warm-start arcs to request sets per route label
     route_req = {}
     for (i, j), k_lbl in init_sol.items():
         ri = nodes_to_reqs.get(i)
         rj = nodes_to_reqs.get(j)
         s = route_req.setdefault(k_lbl, set())
-        if ri is not None: s.add(ri)
-        if rj is not None: s.add(rj)
+        if ri is not None:
+            s.add(ri)
+        if rj is not None:
+            s.add(rj)
 
-    label_to_khat = {}
-    taken_k = set()
+    # Assign each heuristic route to k̂ = min_r rank[r], resolving collisions
+    label_to_khat, taken_k = {}, set()
     for k_lbl, Rset in route_req.items():
         if not Rset:
             continue
@@ -99,8 +106,11 @@ def Run_Model(path, model: Model):
         label_to_khat[k_lbl] = k_hat
         taken_k.add(k_hat)
 
-    for v in X.values(): v.Start = 0.0
-    for v in Y.values(): v.Start = 0.0
+    # Warm-start seeds
+    for v in X.values():
+        v.Start = 0.0
+    for v in Y.values():
+        v.Start = 0.0
 
     n_set_x = 0
     for (i, j), k_lbl in init_sol.items():
@@ -129,7 +139,7 @@ def Run_Model(path, model: Model):
     # Objective
     model.setObjective(quicksum(c[i, j] * X[i, j, k] for (i, j, k) in X), GRB.MINIMIZE)
 
-    # Delivery can only leave if all pickups of its request leave (per cluster k)
+    # Closure: delivery can only depart if all pickups of its request depart (per k)
     Closure_DelivOutBound = {}
     for r in R:
         dl = Dr_single[r]
@@ -139,12 +149,9 @@ def Run_Model(path, model: Model):
                 X[p, j, k] for p in Pr[r] for (_, j) in out_arcs[p] if (p, j, k) in X
             )
             if deliv_out.size() > 0:
-                Closure_DelivOutBound[(r, k)] = model.addConstr(
-                    deliv_out <= pickups_out,
-                    name=f"clos_del_out_bound[r={r},k={k}]"
-                )
+                Closure_DelivOutBound[(r, k)] = model.addConstr(deliv_out <= pickups_out)
 
-    # Degree balance on customer nodes i at each k
+    # Degree/linking per customer node i and position k
     DegreeConstrainIncome = {
         (i, k): model.addConstr(
             quicksum(X[(i, j, k)] for (_, j) in out_arcs[i] if (i, j, k) in X)
@@ -163,13 +170,11 @@ def Run_Model(path, model: Model):
         for i in N for k in R
     }
 
-    # Exactly one start/end per active cluster position k
     StartEq = {
         k: model.addConstr(
             quicksum(X[(depot, j, k)] for (_, j) in out_arcs[depot] if (depot, j, k) in X)
             ==
-            (Y[(pos[k], k)] if (pos[k], k) in Y else 0),
-            name=f"start_eq[{k}]"
+            (Y[(pos[k], k)] if (pos[k], k) in Y else 0)
         )
         for k in R
     }
@@ -178,12 +183,12 @@ def Run_Model(path, model: Model):
         k: model.addConstr(
             quicksum(X[(i, sink, k)] for (i, _) in in_arcs[sink] if (i, sink, k) in X)
             ==
-            (Y[(pos[k], k)] if (pos[k], k) in Y else 0),
-            name=f"end_eq[{k}]"
+            (Y[(pos[k], k)] if (pos[k], k) in Y else 0)
         )
         for k in R
     }
 
+    # At most one departure from depot per cluster position k
     DepotCluster = {
         k: model.addConstr(
             quicksum(X[(depot, j, k)] for (_, j) in out_arcs[depot] if (depot, j, k) in X) <= 1
@@ -197,65 +202,48 @@ def Run_Model(path, model: Model):
         for r in R
     }
 
-    # Number of active clusters bounded by |K|
+    # Limit number of active clusters
     VehicleLimit = model.addConstr(
         quicksum(Y[pos[k], k] for k in R if (pos[k], k) in Y) <= len(K)
     )
 
-    # ---------- Lazy callback helpers ----------
+    # MTZ order variables per node and cluster/position
+    U = {(i, k): model.addVar(vtype=GRB.CONTINUOUS, lb=0.0, ub=len(N))
+         for i in N for k in R}
 
-    def _components_for_cluster(k, xvals):
-        adj = defaultdict(set)
-        nodes = set()
-        for (i, j, kk), _ in X.items():
-            if kk != k or xvals[i, j, k] < 0.5:
-                continue
-            if i in (depot, sink) or j in (depot, sink):
-                continue
-            nodes.add(i); nodes.add(j)
-            adj[i].add(j); adj[j].add(i)
+    # MTZ precedence (pickup → delivery), deactivated if Y[r,k]=0
+    M_MTZ = len(N)
+    for r in R:
+        dl = Dr_single[r]
+        for p in Pr[r]:
+            for k in R:
+                if (r, k) in Y and (p, k) in U and (dl, k) in U:
+                    model.addConstr(U[dl, k] >= U[p, k] + 1 - M_MTZ * (1 - Y[r, k]))
 
-        Sset, seen = [], set()
-        for v in nodes:
-            if v in seen:
-                continue
-            stack, comp = [v], set()
-            while stack:
-                u = stack.pop()
-                if u in seen:
-                    continue
-                seen.add(u)
-                comp.add(u)
-                for w in adj[u]:
-                    if w not in seen:
-                        stack.append(w)
-            if len(comp) >= 2:
-                Sset.append(comp)
-        return Sset
+    # Link U to activity; cap at 0 if (ri,k) not in Y
+    for i in N:
+        ri = inverse_request_map[i]
+        for k in R:
+            if (ri, k) in Y:
+                model.addConstr(U[i, k] <= M_MTZ * Y[ri, k])
+            else:
+                model.addConstr(U[i, k] <= 0)
 
-    def _stronger_rhs(s):
-        stronger = any(all(p in s for p in Pr[r]) and (Dr_single[r] not in s) for r in R)
-        return (len(s) - 2) if stronger else (len(s) - 1)
+    # MTZ core inequalities (within customer nodes)
+    for k in R:
+        for (i, j) in A:
+            if i in N and j in N and i != j and (i, j, k) in X:
+                model.addConstr(U[j, k] >= U[i, k] + 1 - M_MTZ * (1 - X[i, j, k]))
 
-    def _route_for_cluster(k, XV):
-        nxt = {}
-        for (i, j, kk) in X.keys():
-            if kk == k and XV[i, j, k] > 0.5:
-                nxt[i] = j
-        route, seen = [depot], {depot}
-        cur = depot
-        max_steps = len(nxt) + 5
-        while cur in nxt and len(route) < max_steps:
-            cur = nxt[cur]
-            if cur in seen:
-                break
-            route.append(cur); seen.add(cur)
-        return route
+    # Anchor first internal step after depot
+    for k in R:
+        for (_, j) in out_arcs[depot]:
+            if j in N and (depot, j, k) in X:
+                model.addConstr(U[j, k] >= 1 * X[depot, j, k])
 
-    model._sec_seen  = set()
-    model._prec_seen = set()
-    
+    best_obj = float('inf')
 
+    model.Params.LazyConstraints = 1
     def lazy_cb(model, where):
         if where != GRB.Callback.MIPSOL:
             return
@@ -263,41 +251,6 @@ def Run_Model(path, model: Model):
         XV = model.cbGetSolution(X)
         YV = model.cbGetSolution(Y)
 
-        # (1) Subtour elimination with stronger RHS
-        for k in R:
-            Sset = _components_for_cluster(k, XV)
-            for s in Sset:
-                rhs = _stronger_rhs(s)
-                lhs_vars = [X[i, j, k] for i in s for j in s if (i, j, k) in X]
-                if not lhs_vars:
-                    continue
-                lhs_val = sum(XV[i, j, k] for i in s for j in s if (i, j, k) in X)
-                if lhs_val <= rhs + 1e-9:
-                    continue
-                key = (k, frozenset(s), rhs)
-                if key in model._sec_seen:
-                    continue
-                model._sec_seen.add(key)
-                model.cbLazy(quicksum(lhs_vars) <= rhs)
-
-        # (2) Precedence: forbid incumbent's entering-arc into a delivery that appears before its pickups
-        for k in R:
-            route = _route_for_cluster(k, XV)
-            pos_route = {v: i for i, v in enumerate(route)}  # avoid shadowing outer 'pos'
-            for r in R:
-                delivery = Dr_single[r]
-                if delivery not in pos_route:
-                    continue
-                idx_d = pos_route[delivery]
-                prefix = set(route[1:idx_d])  # nodes before delivery (excluding depot)
-                if all(p in prefix for p in Pr[r]):
-                    continue
-                pred = route[idx_d - 1]
-                if (pred, delivery, k) in X and (k, pred, delivery) not in model._prec_seen:
-                    model._prec_seen.add((k, pred, delivery))
-                    model.cbLazy(X[pred, delivery, k] <= 0)
-
-        # (3) Optional route-duration pruning for active clusters
         for k in R:
             active = YV.get((pos.get(k), k), 0.0) > 0.5 or any(
                 YV.get((r, k), 0.0) > 0.5 for r in R if (r, k) in Y
@@ -309,6 +262,7 @@ def Run_Model(path, model: Model):
             if not assigned:
                 continue
 
+            # Follow incumbent route and accumulate duration
             node, seen, duration, ok = depot, {depot}, 0.0, False
             for _ in range(10000):
                 candidates = [
@@ -332,7 +286,6 @@ def Run_Model(path, model: Model):
             if ok and duration > l[depot] + 1e-6:
                 model.cbLazy(quicksum(Y[(r, k)] for r in assigned) <= len(assigned) - 1)
 
-    # Solve
     def report_objective(m: Model):
         st = m.Status
         print(f"Status: {st}")
@@ -359,9 +312,6 @@ def Run_Model(path, model: Model):
         print(f"Runtime           : {m.Runtime:.2f}s")
         print(f"SolCount          : {m.SolCount}, Nodes: {getattr(m, 'NodeCount', 'n/a')}")
 
-
-    model.setParam("LazyConstraints", 1)
-    model.setParam("Presolve", 0)
     model.optimize(lazy_cb)
     report_objective(model)
 
@@ -372,13 +322,12 @@ def Run_Model(path, model: Model):
         K,
         Pr, Dr,
         X, Y,
-        None,
+        U,
         e, l, q,
         t,
         sink,
-        d=d
+        d
     )
-
 
 
 
