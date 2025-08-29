@@ -58,7 +58,7 @@ def Run_Model(path, model: Model):
 
     def allowed_in_cluster(i, k):
         ri = req_of(i)
-        return True if ri is None else (r >= k)  # NOTE: intentional; do not change
+        return True if ri is None else (r >= k) 
 
 
     # Heuristic warm start
