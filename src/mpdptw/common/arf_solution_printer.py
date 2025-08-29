@@ -77,6 +77,45 @@ def _extract_routes_arf(V_ext, X, Kset, sink=None):
         routes[k] = route
     return routes
 
+def _compute_S_from_routes(routes_by_k, t, d, e=None, depot=0):
+    """Compute start times along each reconstructed route:
+       S[j] = max(e[j], S[i] + d[i] + t[i,j])."""
+    S_eff = {}
+    S_eff[depot] = float(e.get(depot, 0.0)) if e is not None else 0.0
+
+    for route in routes_by_k.values():
+        if not route:
+            continue
+        if route[0] != depot:
+            S_eff.setdefault(route[0], S_eff.get(depot, 0.0))
+        for idx in range(1, len(route)):
+            i, j = route[idx - 1], route[idx]
+            tij = float(t.get((i, j), 0.0)) if t is not None else 0.0
+            di  = float(d.get(i, 0.0)) if d is not None else 0.0
+            base = S_eff.get(i, 0.0) + di + tij
+            S_eff[j] = max(base, float(e.get(j, base))) if e is not None else base
+    return S_eff
+
+
+def _compute_S_from_routes(routes_by_k, t, d, e=None, depot=0):
+    """Compute start times along each reconstructed route:
+       S[j] = max(e[j], S[i] + d[i] + t[i,j]) (post-service at i)."""
+    S_eff = {}
+    S_eff[depot] = float(e.get(depot, 0.0)) if e is not None else 0.0
+    for route in routes_by_k.values():
+        if not route:
+            continue
+        if route[0] != depot:
+            S_eff.setdefault(route[0], S_eff.get(depot, 0.0))
+        for idx in range(1, len(route)):
+            i, j = route[idx - 1], route[idx]
+            tij = float(t.get((i, j), 0.0)) if t is not None else 0.0
+            di  = float(d.get(i, 0.0)) if d is not None else 0.0
+            base = S_eff.get(i, 0.0) + di + tij
+            S_eff[j] = max(base, float(e.get(j, base))) if e is not None else base
+    return S_eff
+
+
 def print_solution_summary(
     model,
     V_ext,          # nodes incl. start depot (=0) and sink
@@ -100,31 +139,34 @@ def print_solution_summary(
         obj_val = getattr(model, "objective_value", 0.0) or 0.0
     print(f"Objective  : {obj_val:.3f}")
 
-    # Which k are active? those with 0->j used
     active_k = []
     for k in R:
         used = any(_x3(X, 0, j, k) > 0.5 for j in V_ext if j != 0 and (sink is None or j != sink))
         if used:
             active_k.append(k)
 
-    # vehicles available
     try:
         k_avail = len(K_available)
     except TypeError:
         k_avail = int(K_available)
     print(f"Clusters/vehicles used: {len(active_k)} / {k_avail}")
 
-    node_info = _build_node_index(R, Pr, Dr, sink=sink)
+    node_info   = _build_node_index(R, Pr, Dr, sink=sink)
     routes_by_k = _extract_routes_arf(V_ext, X, R, sink=sink)
 
-    # Request → cluster assignment via Y
+    # If S is missing/invalid, derive it from routes using travel + service times
+    def _finite(x): return x == x and x not in (float("inf"), float("-inf"))
+    S_is_valid = isinstance(S, dict) and any(_finite(_val(S.get(v, float("nan")))) for v in V_ext)
+    if (not S_is_valid) and (t is not None):
+        S = _compute_S_from_routes(routes_by_k, t, d, e=e, depot=0)
+
+    # Request → cluster assignment
     assign = {r: [k for k in R if _y(Y, r, k) > 0.5] for r in R}
 
     print("\nASSIGNMENTS (request -> cluster k)")
     print("-"*76)
     for r in R:
-        ks = assign[r]
-        print(f"req {r}: {ks}")
+        print(f"req {r}: {assign[r]}")
 
     print("\nROUTES per active k (node, type, req | S within [e,l] | q | t(prev->v))")
     for k in active_k:
@@ -133,38 +175,41 @@ def print_solution_summary(
         print(f"Cluster k={k}: " + (" -> ".join(map(str, route)) if route else "(no route)"))
         if not route:
             continue
+
         hdr = f"{'node':>5}  {'type':>10}  {'req':>4}  {'S':>10}   {'[e,l]':>13}  {'q':>6}  {'t(prev->v)':>11}"
         print(hdr)
         print("-"*len(hdr))
+
         total_time = 0.0
         for idx, v in enumerate(route):
             typ, req = node_info.get(v, ("Other", None))
-            s_val = _val(S.get(v, float("nan")))
+            s_val = _val(S.get(v, float("nan"))) if isinstance(S, dict) else float("nan")
             e_v = e.get(v, 0.0)
             l_v = l.get(v, 0.0)
             q_v = q.get(v, 0.0)
 
-            # infer S at depot/sink if desired
-            if t is not None and v == 0 and idx + 1 < len(route):
-                j = route[idx + 1]
-                try:
-                    s_val = _val(S[j]) - float(t[(0, j)])
-                except Exception:
-                    pass
-            if t is not None and sink is not None and v == sink and idx > 0:
+            # Ensure per-route sink time: use predecessor S[i] + d[i] + t[i,sink]
+            if (sink is not None) and (v == sink) and (idx > 0) and (t is not None):
                 i = route[idx - 1]
-                try:
-                    s_val = _val(S[i]) + (d[i] if d is not None else 0.0) + float(t[(i, sink)])
-                except Exception:
-                    pass
+                di  = float(d.get(i, 0.0)) if d is not None else 0.0
+                tij = float(t.get((i, sink), 0.0))
+                s_val = _val(S.get(i, 0.0)) + di + tij
+                if e is not None:
+                    s_val = max(s_val, float(e.get(sink, s_val)))
+
+            # If S[v] still missing (non-sink), infer from predecessor with post-service carryover
+            if (v != sink) and (not _finite(s_val)) and t is not None and idx > 0:
+                i = route[idx - 1]
+                di  = float(d.get(i, 0.0)) if d is not None else 0.0
+                tij = float(t.get((i, v), 0.0))
+                s_val = _val(S.get(i, 0.0)) + di + tij
+                if e is not None:
+                    s_val = max(s_val, float(e.get(v, s_val)))
 
             # travel time from previous
             if t is not None and idx > 0:
                 i = route[idx - 1]
-                try:
-                    tij = float(t[(i, v)])
-                except Exception:
-                    tij = float("nan")
+                tij = float(t.get((i, v), float("nan")))
                 tprev_str = f"{tij:.2f}" if tij == tij else "-"
                 if tij == tij:
                     total_time += tij
@@ -181,8 +226,11 @@ def print_solution_summary(
     print(f"{'req':>4}  {'max S[pick]':>12}  {'S[del]':>10}  {'ok?':>5}")
     for r in R:
         dnode = _as_delivery_node(Dr[r])
-        max_pick = max((_val(S.get(p, float("nan"))) for p in Pr[r]), default=float('-inf'))
-        s_del = _val(S.get(dnode, float("nan")))
+        if isinstance(S, dict):
+            max_pick = max((_val(S.get(p, float("nan"))) for p in Pr[r]), default=float('-inf'))
+            s_del = _val(S.get(dnode, float("nan")))
+        else:
+            max_pick, s_del = float("nan"), float("nan")
         ok = "Y" if (s_del == s_del and s_del + 1e-6 >= max_pick) else "NO"
         print(f"{r:>4}  {max_pick:12.2f}  {s_del:10.2f}  {ok:>5}")
 
@@ -201,10 +249,8 @@ def print_solution_summary(
         print("-"*76)
         arcs_with_t = []
         for (i, j, k) in arcs:
-            try:
-                tij = round(float(t[(i, j)]), 1)
-            except Exception:
-                tij = float("nan")
+            tij = float(t.get((i, j), float("nan")))
+            tij = round(tij, 1) if tij == tij else tij
             arcs_with_t.append((i, j, k, tij))
         print(arcs_with_t)
 

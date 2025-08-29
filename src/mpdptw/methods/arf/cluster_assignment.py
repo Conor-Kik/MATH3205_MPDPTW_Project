@@ -57,12 +57,15 @@ def extract_order(U, R):
 
 
 def Run_Cluster_Assignment_Model(inst, model: Model, W, time_limit, outputflag):
-    model.setParam("MIPFocus", 1)
-    model.setParam("TimeLimit", time_limit) 
+
     if outputflag:
+        model.setParam("OutputFlag", 1)
         print(W)
         print("********************************")
-
+    else: 
+        model.setParam("OutputFlag", 0)
+    model.setParam("MIPFocus", 1)
+    model.setParam("TimeLimit", time_limit) 
     EPS = 1e-6
     # Sets (extended with sink depot)
     V = inst["V_ext"]  # all nodes including origin (0) and sink
@@ -82,9 +85,9 @@ def Run_Cluster_Assignment_Model(inst, model: Model, W, time_limit, outputflag):
     U = {(r, k) : model.addVar(vtype=GRB.BINARY) for r in R for k in K}    
     V = {(r,k): model.addVar(lb=0, ub=1) for r in R for k in K}
     Z = {(i,j,k): model.addVar(lb=0, ub=1) for i in R for j in R for k in K if i<j}
-
-    W_i = {i : [j for (ii, j) in W if i == ii]
-           for i in R}
+    if W:
+        W_i = {i : [j for (ii, j) in W if i == ii]
+            for i in R}
 
     model.setObjective(
         quicksum(e_ij[i, j]*Z[i,j,k] for k in R for j in R for i in R if i < j)
@@ -105,11 +108,16 @@ def Run_Cluster_Assignment_Model(inst, model: Model, W, time_limit, outputflag):
     ZtoV = {(i, j, k):
             model.addConstr(Z[i, j, k] >= V[i, k] + V[j, k] - 1)
             for i in R for j in R for k in K if i < j}
-    
-    InfeasClusterAssignment = {(i, l, k):
-                               model.addConstr(V[i,l] >= U[i, k] - quicksum(U[j, l] for j in W_i[i]))
+    if W:
+        InfeasClusterAssignment = {(i, l, k):
+                                model.addConstr(V[i,l] >= U[i, k] - quicksum(U[j, l] for j in W_i[i]))
+        
     for i in R for l in R for k in K if l < k}
-
+    else:
+        InfeasClusterAssignment = {(i, l, k):
+                                model.addConstr(V[i,l] >= U[i, k])
+        
+    for i in R for l in R for k in K if l < k}
 
     model.params.OutputFlag = outputflag
     model.optimize()
@@ -126,8 +134,9 @@ def Run_Cluster_Assignment_Model(inst, model: Model, W, time_limit, outputflag):
 
         print("Infeasible pairs W:", W)
         print("Request incompatibility sets W_i:")
-        for r, wr in W_i.items():
-            print(f"   Request {r}: incompatible with {wr}")
+        if W:
+            for r, wr in W_i.items():
+                print(f"   Request {r}: incompatible with {wr}")
 
         print("e_i", e_i)
         #print("e_ij", e_ij)

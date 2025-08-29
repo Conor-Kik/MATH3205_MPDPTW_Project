@@ -180,7 +180,7 @@ def Run_Model(path, model: Model):
 
                 rhs = len(s) - 2 if stronger else len(s) - 1
                 model.cbLazy(quicksum(X[i, j] for i in s for j in s if (i, j) in X) <= rhs)
-    model.optimize(subtour_callback)
+    model.optimize()
 
     print_solution_summary(model, V_ext, R, K, Pr, Dr, X, S, e, l, q, t=t, sink=sink, d=d)
 

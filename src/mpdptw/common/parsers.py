@@ -167,13 +167,18 @@ def build_milp_data(filename, cost_equals_time=True, speed=1.0):
     r = inst["Nodes_To_Reqs"]
     A_feas = inst["A_feasible_ext"]
     sink = inst["sink"]
-    #if filename[0] != 'w':
-    W = Infeasible_Req_Pairs(inst, output_flag=OUTPUT_W_SET_MODEL)
-    inst["W"] = W
-    inst["A_feasible_ext"] = [
-        (i, j) for (i, j) in A_feas
-        if (r[i], r[j]) not in W and (r[j], r[i]) not in W
-    ]
+    path = Path(filename)
+    if path.name[0] != 'w':# or path.name[2] != '4':
+        W = Infeasible_Req_Pairs(inst, output_flag=OUTPUT_W_SET_MODEL)
+        inst["W"] = W
+        inst["A_feasible_ext"] = [
+            (i, j) for (i, j) in A_feas
+            if (r[i], r[j]) not in W and (r[j], r[i]) not in W
+        ]
+    else:
+        inst["W"] = []
+
+        
     print(f"-----------\nARCS CUTS: {len(inst["A"]) - len(inst["A_feasible_ext"])}\n-----------")
     return inst
 
@@ -240,7 +245,11 @@ def build_dictionary(filename, cost_equals_time=True, speed=1.0):
     pickups_all    = {p for r in R for p in Pr[r]}
 
     def _feasible_arc_ext(i, j):
+        if i == 0 and j == sink:
+            return False
         if j == 0 or i == sink:
+            return False
+        if i in pickups_all and j == sink:
             return False
         if i == 0 and j in deliveries_all:
             return False
@@ -253,13 +262,13 @@ def build_dictionary(filename, cost_equals_time=True, speed=1.0):
         return e_ext[i] + d_ext[i] + t_ext[(i, j)] <= l_ext[j]
 
     A_feasible_ext = [(i, j) for (i, j) in A_ext_no_loops if _feasible_arc_ext(i, j)]
-    
     # Minimal S-sets (one per request)
     S_minimal_ext = _compute_minimal_S_sets(Pr, Dr_single, sink, start=0)
     e[sink] = e[0]
     l[sink] = l[0]
     d[sink] = 0
-    q[sink] = 0 
+    q[sink] = 0
+     
     return {
         "Nodes_To_Reqs" : node_to_req, 
         "V": V, "P": P, "D": D, "N": N, "A": A,
@@ -281,6 +290,8 @@ def build_dictionary(filename, cost_equals_time=True, speed=1.0):
         "c_ext": c_ext,
         "Dr_single": Dr_single,
         "S_minimal_ext": S_minimal_ext,
+        "Coords" : coords
+
     }
 
 # --------- Example ---------

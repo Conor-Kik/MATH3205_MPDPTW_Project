@@ -17,6 +17,11 @@ REGISTRY: Dict[str, Dict[str, str]] = {
     },
     "arf": {
        "baseline": "mpdptw.methods.arf.MPDTW_Solver_Arf:main", 
+       "W": "mpdptw.methods.arf.W_instance_Model:main", 
+       "B": "mpdptw.methods.arf.Benders_Decomp:main", 
+    },
+    "ALNS": {
+    "baseline": "mpdptw.methods.no_tw.MPDTW_Solver:main", 
     },
 }
 
