@@ -9,7 +9,7 @@ from mpdptw.methods.no_tw.backup import Run_Models
 OUTPUT_REQ_MODEL = 0 # 1 Shows for request pair infeasibility model output
 OUTPUT_CLUSTER_MODEL = 0 # 1 Shows full cluster_model output
 PREPROCESSING_CUTOFF = 10 #Amount of time that cluster assignment model termininates (seconds)
-PLOT_CLUSTERS = 0
+PLOT_CLUSTERS = 1 
 
 
 def Run_Model(path, model: Model):
