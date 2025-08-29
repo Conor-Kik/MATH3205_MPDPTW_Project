@@ -310,10 +310,6 @@ def Run_Model(path, model: Model):
                             model._prefix_seen.add(key_pref)
                             model.cbLazy(quicksum(X[i, j, k] for (i, j) in prefix_arcs)
                                         <= len(prefix_arcs) - 1)
-                            continue
-                        else:
-                            print("seen")
-
                     # 2) 
                     route_arcs = []
                     for a in range(len(route)-1):
@@ -326,9 +322,6 @@ def Run_Model(path, model: Model):
                             model._route_seen.add(key_route)
                             model.cbLazy(quicksum(X[i, j, k] for (i, j) in route_arcs)
                                         <= len(route_arcs) - 1)
-                            continue
-
-
 
             if ok and duration > l[depot] + 1e-6:
                 model.cbLazy(quicksum(Y[(r, k)] for r in assigned) <= len(assigned) - 1)
