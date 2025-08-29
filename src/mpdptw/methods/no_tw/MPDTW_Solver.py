@@ -281,6 +281,7 @@ def Run_Model(path, model: Model):
             
             # --- Precedence no-good cuts: if a delivery appears before its pickups ---
             # Use route even if 'ok' is False (we can still cut the bad prefix/route)
+            cut_added = False
             if len(route) >= 2:
                 posr = {v: i for i, v in enumerate(route)}
                 violating = None  # (r_bad, dnode_idx)
@@ -293,7 +294,6 @@ def Run_Model(path, model: Model):
                     if any((p in posr) and (posr[p] > idx_d) for p in Pr[r]):
                         violating = (r, idx_d)
                         break
-
                 if violating is not None:
                     r_bad, idx_d = violating
 
@@ -308,8 +308,10 @@ def Run_Model(path, model: Model):
                         key_pref = (k, tuple(prefix_arcs))
                         if key_pref not in model._prefix_seen:
                             model._prefix_seen.add(key_pref)
+                            cut_added = True
                             model.cbLazy(quicksum(X[i, j, k] for (i, j) in prefix_arcs)
                                         <= len(prefix_arcs) - 1)
+                            
                     # 2) 
                     route_arcs = []
                     for a in range(len(route)-1):
@@ -320,10 +322,10 @@ def Run_Model(path, model: Model):
                         key_route = (k, frozenset(route_arcs))
                         if key_route not in model._route_seen:
                             model._route_seen.add(key_route)
+                            cut_added = True
                             model.cbLazy(quicksum(X[i, j, k] for (i, j) in route_arcs)
                                         <= len(route_arcs) - 1)
-
-            if ok and duration > l[depot] + 1e-6:
+            if ok and not cut_added and duration > l[depot] + 1e-6:
                 model.cbLazy(quicksum(Y[(r, k)] for r in assigned) <= len(assigned) - 1)
 
 
