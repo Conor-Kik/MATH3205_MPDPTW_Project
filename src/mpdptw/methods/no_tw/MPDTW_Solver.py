@@ -37,7 +37,7 @@ def Run_Model(path, model: Model):
 
     depot    = inst["depot"]
     sink     = inst["sink"]
-
+    D_nodes  = set(Dr_single[r] for r in R)
     # Adjacency
     in_arcs, out_arcs = {j: [] for j in V}, {i: [] for i in V}
     for (i, j) in A:
@@ -60,7 +60,7 @@ def Run_Model(path, model: Model):
 
 
     # Heuristic warm start
-    init_sol, total_cost, clusters_to_reqs = warm_start_solution(inst, plot_clusters=PLOT_CLUSTERS)
+    init_sol, total_cost, clusters_to_reqs = warm_start_solution(inst, PLOT_CLUSTERS)
     used_labels = {k_lbl for (_, _), k_lbl in init_sol.items()}
     # Rank/position model for cluster ordering
     rank, pos = Run_Cluster_Assignment_Model(
@@ -137,7 +137,6 @@ def Run_Model(path, model: Model):
     model.setObjective(quicksum(c[i, j] * X[i, j, k] for (i, j, k) in X), GRB.MINIMIZE)
 
 
-
     # Degree/linking per customer node i and position k
     DegreeConstrainIncome = {
         (i, k): model.addConstr(
@@ -187,8 +186,7 @@ def Run_Model(path, model: Model):
     )
 
 
-    model._prefix_seen = set()   
-    model._route_seen  = set()   
+    model._prec_seen = set()   
     model._sec_seen = set()
 
     def _components_for_cluster(k, xvals, X, depot, sink, N):
@@ -223,54 +221,43 @@ def Run_Model(path, model: Model):
                 Sset.append(comp)
         return Sset
     
-
     def lazy_cb(model, where):
         if where != GRB.Callback.MIPSOL:
             return
 
         XV = model.cbGetSolution(X)
         YV = model.cbGetSolution(Y)
-        for k in R:
-            Sset = _components_for_cluster(k, XV, X, depot, sink, N)
-            for s in Sset:
-                key = (k, frozenset(s))
-                if key in model._sec_seen:
-                    continue
-                lhs_vars = [X[i, j, k] for i in s for j in s if (i, j, k) in X]
-                if not lhs_vars:
-                    continue
-                lhs_val = sum(XV[i, j, k] for i in s for j in s if (i, j, k) in X)
-                rhs = len(s) - 1
-                if lhs_val > rhs + 1e-9:
-                    model._sec_seen.add(key)
-                    model.cbLazy(quicksum(lhs_vars) <= rhs)
 
-        for k in R:
-            active = YV.get((pos.get(k), k), 0.0) > 0.5 or any(
-                YV.get((r, k), 0.0) > 0.5 for r in R if (r, k) in Y
-            )
-            if not active:
-                continue
+        # ---- helpers ------------------------------------------------------------
+        def add_cut_once(key, expr, rhs):
+            if key in model._prec_seen:
+                return False
+            model._prec_seen.add(key)
+            model.cbLazy(expr <= rhs)
+            return True
 
-            assigned = [r for r in R if (r, k) in Y and YV[(r, k)] > 0.5]
-            if not assigned:
-                continue
+        def sum_x_within(S, k):
+            # sum_{i in S} sum_{j in S} x_{i,j,k}
+            return quicksum(X[i, j, k] for i in S for j in S if (i, j, k) in X)
 
-            # --- Reconstruct incumbent route (and record nodes) ---
+        def sum_x(from_set, to_set, k):
+            # sum_{i in A} sum_{j in B} x_{i,j,k}
+            return quicksum(X[i, j, k] for i in from_set for j in to_set if (i, j, k) in X)
+
+        def build_route_for_k(k):
+            # returns (route list, pos map, ok flag, duration)
             node, seen, duration, ok = depot, {depot}, 0.0, False
-            route = [depot]  
+            route = [depot]
             for _ in range(len(V) + 1):
-                candidates = [
-                    j for (_, j) in out_arcs[node]
-                    if (node, j, k) in X and XV.get((node, j, k), 0.0) > 0.5
-                ]
-                if not candidates:
+                # choose the unique active outgoing arc in incumbent
+                nxts = [j for (_, j) in out_arcs[node] if (node, j, k) in X and XV.get((node, j, k), 0.0) > 0.5]
+                if not nxts:
                     ok = False
                     break
-                j = candidates[0]
+                j = nxts[0]
                 duration += d.get(node, 0.0) + t[node, j]
                 node = j
-                route.append(node)   # <--- track
+                route.append(node)
                 if node == sink:
                     ok = True
                     break
@@ -278,55 +265,94 @@ def Run_Model(path, model: Model):
                     ok = False
                     break
                 seen.add(node)
-            
-            # --- Precedence no-good cuts: if a delivery appears before its pickups ---
-            # Use route even if 'ok' is False (we can still cut the bad prefix/route)
-            cut_added = False
-            if len(route) >= 2:
-                posr = {v: i for i, v in enumerate(route)}
-                violating = None  # (r_bad, dnode_idx)
-                for r in R:
-                    dnode = Dr_single[r]
-                    if dnode not in posr:
-                        continue
-                    idx_d = posr[dnode]
-                    # any pickup of r AFTER the delivery?
-                    if any((p in posr) and (posr[p] > idx_d) for p in Pr[r]):
-                        violating = (r, idx_d)
-                        break
-                if violating is not None:
-                    r_bad, idx_d = violating
+            pos = {v: i for i, v in enumerate(route)}
+            return route, pos, ok, duration
 
-                    # 1) Prefix no-good: forbid reusing the exact prefix up to dnode
-                    prefix_nodes = route[:idx_d+1]     # [depot, ..., pred, dnode]
-                    prefix_arcs = []
-                    for a in range(len(prefix_nodes)-1):
-                        i, j = prefix_nodes[a], prefix_nodes[a+1]
-                        if (i, j, k) in X:
-                            prefix_arcs.append((i, j))
-                    if prefix_arcs:
-                        key_pref = (k, tuple(prefix_arcs))
-                        if key_pref not in model._prefix_seen:
-                            model._prefix_seen.add(key_pref)
-                            cut_added = True
-                            model.cbLazy(quicksum(X[i, j, k] for (i, j) in prefix_arcs)
-                                        <= len(prefix_arcs) - 1)
-                            
-                    # 2) 
-                    route_arcs = []
-                    for a in range(len(route)-1):
-                        i, j = route[a], route[a+1]
-                        if (i, j, k) in X:
-                            route_arcs.append((i, j))
-                    if route_arcs:
-                        key_route = (k, frozenset(route_arcs))
-                        if key_route not in model._route_seen:
-                            model._route_seen.add(key_route)
-                            cut_added = True
-                            model.cbLazy(quicksum(X[i, j, k] for (i, j) in route_arcs)
-                                        <= len(route_arcs) - 1)
-            if ok and not cut_added and duration > l[depot] + 1e-6:
-                model.cbLazy(quicksum(Y[(r, k)] for r in assigned) <= len(assigned) - 1)
+
+
+        # ---- 1) SEC separation ---------------------------------------------------
+        cut_added = False
+        for k in R:
+            Ssets = _components_for_cluster(k, XV, X, depot, sink, N)
+            for s in Ssets:
+                key = (k, frozenset(s))
+                if key in model._sec_seen:
+                    continue
+                lhs_val = sum(XV[i, j, k] for i in s for j in s if (i, j, k) in X)
+                rhs = len(s) - 1
+                if lhs_val > rhs + 1e-9:
+                    model._sec_seen.add(key)
+                    model.cbLazy(quicksum(X[i, j, k] for i in s for j in s if (i, j, k) in X) <= rhs)
+                    cut_added = True
+
+        # ---- 2) Precedence cuts ONLY if NO SEC was added ------------------------
+        if not cut_added:
+            
+
+
+            for k in R:
+                # active + assigned requests on k
+                active = YV.get((pos.get(k), k), 0.0) > 0.5 or any(YV.get((r, k), 0.0) > 0.5 for r in R if (r, k) in Y)
+                if not active:
+                    continue
+                assigned = [r for r in R if (r, k) in Y and YV.get((r, k), 0.0) > 0.5]
+                if not assigned:
+                    continue
+
+                route, posr, ok, duration = build_route_for_k(k)
+                if len(route) < 2:
+                    continue
+
+                # -------- (54): delivery -> ... -> pickup  (pickup after delivery)
+                for r in assigned:
+                    dr = Dr_single[r]
+                    if dr not in posr:
+                        continue
+                    idx_d = posr[dr]
+                    # all pickups of r that occur AFTER the delivery
+                    for p in (pp for pp in Pr[r] if pp in posr and posr[pp] > idx_d):
+                        idx_p = posr[p]
+                        S_nodes = route[idx_d + 1: idx_p]     # strictly between dr and p
+                        if not S_nodes:
+                            continue
+                        key = ("54", k, dr, p, tuple(S_nodes))
+                        # x(dr,S) + x(S) + x(S,p) <= |S|
+                        expr = sum_x({dr}, S_nodes, k) + sum_x_within(S_nodes, k) + sum_x(S_nodes, {p}, k)
+                        add_cut_once(key, expr, len(S_nodes))
+                        cut_added = True
+
+                # -------- (52): depot -> ... -> dr but NOT all pickups before dr
+                for r in assigned:
+                    dr = Dr_single[r]
+                    if dr not in posr:
+                        continue
+                    idx_d = posr[dr]
+                    # pickup missing or appears after dr
+                    if not any((p not in posr) or (posr[p] > idx_d) for p in Pr[r]):
+                        continue
+                    S_nodes = route[1: idx_d]                # strictly between depot and dr
+                    if not S_nodes:
+                        continue
+                    key = ("52", k, dr, tuple(S_nodes))
+                    # x(0,S) + x(S ∪ {dr}) <= |S|
+                    expr = sum_x({depot}, S_nodes, k) + sum_x_within(S_nodes + [dr], k)
+                    add_cut_once(key, expr, len(S_nodes))
+                    cut_added = True
+
+        # ---- 3) time/scheduling cut (skip if any invalid ordering) ------------
+        if not cut_added:
+            for k in R:
+                assigned = [r for r in R if (r, k) in Y and YV.get((r, k), 0.0) > 0.5]
+               
+                if not assigned:
+                    continue
+                
+                route, posr, ok, duration = build_route_for_k(k)
+                if ok and duration > l[depot] + 1e-6:
+                    model.cbLazy(quicksum(Y[(r, k)] for r in assigned) <= len(assigned) - 1)
+
+
+
 
 
     def report_objective(m: Model):
@@ -370,7 +396,9 @@ def Run_Model(path, model: Model):
         sink,
         d
     )
-
+    if model.Status == GRB.OPTIMAL:
+        print("Optimal Objective Found")
+        print(f"Warm Start Obj: {total_cost:.2f}, Actual Obj: {model.ObjVal:.2f}, Gap: {100*abs(total_cost-model.ObjVal)/model.ObjVal:.2f}%")
 def main(argv=None):
     path, _ = parse_instance_argv(argv, default_filename="l_4_25_4.txt")
     model = Model("MPDTW")

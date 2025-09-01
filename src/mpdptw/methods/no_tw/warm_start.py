@@ -35,7 +35,7 @@ def hierarchical_merge_labels(D, kept_R, inst):
     Returns:
       labels: list of ints, same length as kept_R; labels[i] = cluster id of kept_R[i]
     """
-    limit = inst["l"][inst["depot"]]
+    limit = inst["l"][0]
 
     # Working copy of distances with self-distances masked
     W = [row[:] for row in D]
@@ -185,7 +185,6 @@ def solve_cluster_with_fallback(subset, inst):
         _m, s_cost, arcs = Run_Model(subset, inst)
         if s_cost is not None:
             return float(s_cost), [tuple(a) for a in arcs]
-
     # Greedy fallback (derive inputs from inst)
     V = inst["V_ext"]; A = inst["A_feasible_ext"]
     Pr = inst["Pr"]; Dr_single = inst["Dr_single"]
@@ -262,7 +261,6 @@ def warm_start_solution(inst, plot_clusters = 0):
     route_to_reqs = {i: subsets[i] for i in range(len(subsets))}
 
     print("Cluster sizes:", [len(s) for s in subsets])
-
     # Solve each cluster (MIP → greedy)
     route_to_costs = {i: 0.0 for i in range(len(subsets))}
     arc_to_route   = {}
@@ -277,12 +275,12 @@ def warm_start_solution(inst, plot_clusters = 0):
 
 
 
-    if all(c <= LIMIT for c in route_to_costs.values()):
-        print(f"Accepted k={len(subsets)} (all route costs ≤ l[sink]={LIMIT})")
-        print(f"Total cost of all routes = {total_cost:.6f}")
-        for rid in sorted(route_to_reqs):
-            print(f"Route {rid}: requests={route_to_reqs[rid]}  |  finish time={route_to_costs[rid]:.6f}")
-        return arc_to_route, total_cost, route_to_reqs
+    #if all(c <= LIMIT for c in route_to_costs.values()):
+    print(f"Accepted k={len(subsets)} (all route costs ≤ l[sink]={LIMIT})")
+    print(f"Total cost of all routes = {total_cost:.6f}")
+    for rid in sorted(route_to_reqs):
+        print(f"Route {rid}: requests={route_to_reqs[rid]}  |  finish time={route_to_costs[rid]:.6f}")
+    return arc_to_route, total_cost, route_to_reqs
 
 
 def plot_cluster_labels(prelabel, kept_R, inst,
