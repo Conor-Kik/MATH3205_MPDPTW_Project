@@ -52,23 +52,20 @@ def Generate_Routes(path, model : Model):
         if _m.Status in (GRB.USER_OBJ_LIMIT, GRB.INFEASIBLE):
             continue
 
-        # collect all nodes visited for this subset: pickups + the (single) delivery
         nodes = set()
         for r in subset:
-            nodes.update(Pr[r])            # list of pickup node IDs
-            nodes.add(Dr_single[r])        # delivery node ID
+            nodes.update(Pr[r])            
+            nodes.add(Dr_single[r])       
 
-        # total service time in this subset (use 0.0 if a node is missing in d)
         service_time = sum(d.get(node_id, 0.0) for node_id in nodes)
-
-        # travel-only cost
         costs[subset] = s_cost - service_time
     
     result = {i: [] for i in range(len(R))}
     for s in costs.keys():
         for elem in s:
             result[elem].append(s)
-    P = range(len(costs))
+
+
     Z = {p : model.addVar(vtype=GRB.BINARY) for p in costs}
 
     model.setObjective(quicksum(Z[p] *costs[p] for p in costs.keys()), GRB.MINIMIZE)
