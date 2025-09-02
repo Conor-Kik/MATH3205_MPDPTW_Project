@@ -8,7 +8,7 @@ from collections import defaultdict
 OUTPUT_REQ_MODEL = 0 # 1 Shows for request pair infeasibility model output
 OUTPUT_CLUSTER_MODEL = 0 # 1 Shows full cluster_model output
 PREPROCESSING_CUTOFF = 10 #Amount of time that cluster assignment model termininates (seconds)
-PLOT_CLUSTERS = 1 #1 Show plot of warm_start prediction
+PLOT_CLUSTERS = 1#1 Show plot of warm_start prediction
 
 def Run_Model(path, model: Model):
     inst = build_milp_data(str(path))
@@ -303,7 +303,27 @@ def Run_Model(path, model: Model):
                 if len(route) < 2:
                     continue
 
-                # -------- (54): delivery -> ... -> pickup  (pickup after delivery)
+                # -------- (52): depot -> ... -> dr but NOT all pickups before dr
+                for r in assigned:
+
+                    dr = Dr_single[r]
+                    if dr not in posr:
+                        continue
+                    idx_d = posr[dr]
+                    # pickup missing or appears after dr
+                    if not any((p not in posr) or (posr[p] > idx_d) for p in Pr[r]):
+                        continue
+                    S_nodes = route[1: idx_d]                # strictly between depot and dr
+                    if not S_nodes:
+                        continue
+                    key = ("52", k, dr, tuple(S_nodes))
+                    # x(0,S) + x(S ∪ {dr}) <= |S|
+                    expr = sum_x({depot}, S_nodes, k) + sum_x_within(S_nodes + [dr], k)
+                    add_cut_once(key, expr, len(S_nodes))
+                    cut_added = True
+
+
+                                # -------- (54): delivery -> ... -> pickup  (pickup after delivery)
                 for r in assigned:
                     dr = Dr_single[r]
                     if dr not in posr:
@@ -320,24 +340,6 @@ def Run_Model(path, model: Model):
                         expr = sum_x({dr}, S_nodes, k) + sum_x_within(S_nodes, k) + sum_x(S_nodes, {p}, k)
                         add_cut_once(key, expr, len(S_nodes))
                         cut_added = True
-
-                # -------- (52): depot -> ... -> dr but NOT all pickups before dr
-                for r in assigned:
-                    dr = Dr_single[r]
-                    if dr not in posr:
-                        continue
-                    idx_d = posr[dr]
-                    # pickup missing or appears after dr
-                    if not any((p not in posr) or (posr[p] > idx_d) for p in Pr[r]):
-                        continue
-                    S_nodes = route[1: idx_d]                # strictly between depot and dr
-                    if not S_nodes:
-                        continue
-                    key = ("52", k, dr, tuple(S_nodes))
-                    # x(0,S) + x(S ∪ {dr}) <= |S|
-                    expr = sum_x({depot}, S_nodes, k) + sum_x_within(S_nodes + [dr], k)
-                    add_cut_once(key, expr, len(S_nodes))
-                    cut_added = True
 
         # ---- 3) time/scheduling cut (skip if any invalid ordering) ------------
         if not cut_added:
@@ -382,6 +384,7 @@ def Run_Model(path, model: Model):
         print(f"SolCount          : {m.SolCount}, Nodes: {getattr(m, 'NodeCount', 'n/a')}")
     model.Params.LazyConstraints = 1
     model.optimize(lazy_cb)
+    
     report_objective(model)
     print_solution_summary(
         model,
