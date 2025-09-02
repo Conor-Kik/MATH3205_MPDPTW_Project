@@ -24,13 +24,15 @@ def pairwise_matrix(sets):
     return D
 
 
-def hierarchical_merge_labels(D, kept_R, inst):
+
+def hierarchical_merge_labels(D, kept_R, inst, points):
     """
     Returns cluster labels aligned with kept_R order.
 
-    D: distance matrix (len == len(kept_R))
+    D: initial symmetric Chamfer distance matrix (len == len(kept_R))
     kept_R: list mapping row index -> request id
     inst: instance dict (used for limit and subproblem solves)
+    points: list of numpy arrays, one per kept_R entry (each is a point set)
 
     Returns:
       labels: list of ints, same length as kept_R; labels[i] = cluster id of kept_R[i]
@@ -43,23 +45,30 @@ def hierarchical_merge_labels(D, kept_R, inst):
     for i in range(n):
         W[i][i] = float('inf')
 
-    clusters = {i: [i] for i in range(n)}   # cluster id -> list of row indices
-    sizes    = {i: 1 for i in range(n)}
+    # cluster id -> list of row indices
+    clusters = {i: [i] for i in range(n)}
     active   = set(range(n))
+    point_sets = {i: points[i] for i in range(n)} 
+    def update_chamfer(i, j):
+        # merge sets
+        point_sets[i] = np.concatenate((point_sets[i], point_sets[j]), axis=0)
+        del point_sets[j]
 
-    def update_average(i, j):
-        si, sj = sizes[i], sizes[j]
-        denom = si + sj
+        clusters[i].extend(clusters[j])
+        del clusters[j]
+
+        # recompute Chamfer(i, m) for other active clusters
         for m in list(active):
             if m == i or m == j:
                 continue
-            val = (si * W[i][m] + sj * W[j][m]) / denom
+            val = chamfer(point_sets[i], point_sets[m])
             W[i][m] = val
             W[m][i] = val
+
+        # mask out j
         for m in range(n):
-            W[j][m] = float('inf'); W[m][j] = float('inf')
-        sizes[i] = denom
-        del sizes[j]
+            W[j][m] = float('inf')
+            W[m][j] = float('inf')
 
     def argmin_pair():
         best = float('inf'); bi = bj = -1
@@ -83,10 +92,8 @@ def hierarchical_merge_labels(D, kept_R, inst):
 
         cost, arcs = solve_cluster_with_fallback(subset_ids, inst)
         if cost is not None and cost <= limit:
-            clusters[i].extend(clusters[j])
-            del clusters[j]
             active.discard(j)
-            update_average(i, j)
+            update_chamfer(i, j)
         else:
             W[i][j] = float('inf')
             W[j][i] = float('inf')
@@ -247,7 +254,7 @@ def warm_start_solution(inst, plot_clusters = 0):
 
     LIMIT = l[sink]
 
-    prelabel = hierarchical_merge_labels(D, kept_R, inst)
+    prelabel = hierarchical_merge_labels(D, kept_R, inst, coord_sets)
     if plot_clusters:
         plot_cluster_labels(prelabel, kept_R, inst)
     # Map kept request id -> cluster id
