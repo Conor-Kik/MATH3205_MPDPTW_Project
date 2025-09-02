@@ -8,7 +8,6 @@ def Run_Model(subset, inst, Time_Lim = True, Output = 0):
         print("********************")
         print(subset)
         print("********************")
-    model.setParam("MIPFocus", 1)
 
 
     if Time_Lim:
