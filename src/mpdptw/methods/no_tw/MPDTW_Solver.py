@@ -185,7 +185,7 @@ def Run_Model(path, model: Model):
         quicksum(Y[pos[k], k] for k in R if (pos[k], k) in Y) <= len(K)
     )
 
-
+    model._pairprec_seen = set()
     model._prec_seen = set()   
     model._sec_seen = set()
 
@@ -272,18 +272,53 @@ def Run_Model(path, model: Model):
 
         # ---- 1) SEC separation ---------------------------------------------------
         cut_added = False
+
         for k in R:
             Ssets = _components_for_cluster(k, XV, X, depot, sink, N)
+
+            # (a) Plain SECs (|S|-1)
             for s in Ssets:
                 key = (k, frozenset(s))
                 if key in model._sec_seen:
                     continue
-                lhs_val = sum(XV[i, j, k] for i in s for j in s if (i, j, k) in X)
+                lhs_val = sum(XV.get((i, j, k), 0.0) for i in s for j in s if (i, j, k) in X)
                 rhs = len(s) - 1
                 if lhs_val > rhs + 1e-9:
                     model._sec_seen.add(key)
                     model.cbLazy(quicksum(X[i, j, k] for i in s for j in s if (i, j, k) in X) <= rhs)
                     cut_added = True
+
+            # (b) Pairing/precedence cut (constraint 16): |S|-2
+            # Trigger when a component C contains all pickups of some request r
+            # but excludes its delivery; then S = C ∪ {sink}
+            for s in Ssets:
+                triggers = False
+                for r in Pr:  # Pr[r] is pickups list/set; Dr_single[r] is delivery node 
+                    if set(Pr[r]).issubset(s) and (Dr_single[r] not in s):
+                        triggers = True
+                        break
+                if not triggers:
+                    continue
+
+                S = set(s)
+                S.add(sink) 
+
+                key16 = (k, frozenset(S))
+                if key16 in model._pairprec_seen:
+                    continue
+
+                lhs_val = 0.0
+                for i in S:
+                    for j in S:
+                        if (i, j, k) in X:
+                            lhs_val += XV.get((i, j, k), 0.0)
+
+                rhs = len(S) - 2
+                if lhs_val > rhs + 1e-9:
+                    model._pairprec_seen.add(key16)
+                    model.cbLazy(quicksum(X[i, j, k] for i in S for j in S if (i, j, k) in X) <= rhs)
+                    cut_added = True
+
 
         # ---- 2) Precedence cuts ONLY if NO SEC was added ------------------------
         if not cut_added:
