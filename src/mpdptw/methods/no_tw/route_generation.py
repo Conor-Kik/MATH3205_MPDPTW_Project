@@ -46,24 +46,34 @@ def Generate_Routes(path, model : Model):
     start_time = time.perf_counter()
     routes = list(subsets_up_to_k(len(R), len(R)))
     costs = {}
-    print("Number of Route to Check", len(routes))
-    for subset in routes:
+    total = len(routes)
+    print("Number of routes to check:", total)
+
+    checkpoints = {int(total * p / 100) for p in range(5, 101, 5)}  # 5%, 10%, … 100%
+
+    for idx, subset in enumerate(routes, start=1):
         _m, s_cost, arcs = Run_Model(subset, inst, False, OUTPUT)
         if _m.Status in (GRB.USER_OBJ_LIMIT, GRB.INFEASIBLE):
             continue
 
         nodes = set()
         for r in subset:
-            nodes.update(Pr[r])            
+            nodes.update(Pr[r])
             nodes.add(Dr_single[r])       
 
         service_time = sum(d.get(node_id, 0.0) for node_id in nodes)
         costs[subset] = s_cost - service_time
-    
+
+        # progress printing
+        if idx in checkpoints:
+            pct = (idx / total) * 100
+            print(f"Progress: {pct:.0f}% ({idx}/{total})")
+
     result = {i: [] for i in range(len(R))}
     for s in costs.keys():
         for elem in s:
             result[elem].append(s)
+
 
 
     Z = {p : model.addVar(vtype=GRB.BINARY) for p in costs}
