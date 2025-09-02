@@ -1,10 +1,18 @@
 from gurobipy import *
 
-def Run_Model(subset, inst):
+def Run_Model(subset, inst, Time_Lim = True, Output = 0):
     model = Model("BSP")
-    model.setParam("OutputFlag", 0)
+    if Output == 0:
+        model.setParam("OutputFlag", 0)
+    else:
+        print("********************")
+        print(subset)
+        print("********************")
     model.setParam("MIPFocus", 1)
-    model.setParam("TimeLimit", len(subset) * 2)
+
+
+    if Time_Lim:
+        model.setParam("TimeLimit", len(subset) * 3)
 
     # Instance data
     A_all   = inst["A_feasible_ext"]
