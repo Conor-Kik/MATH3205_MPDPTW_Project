@@ -1,6 +1,6 @@
 from gurobipy import *
 
-def Run_Model(subset, inst, Time_Lim = True, Output = 0):
+def Run_Model(subset, inst, Time_Lim=True, Output=0):
     model = Model("BSP")
     if Output == 0:
         model.setParam("OutputFlag", 0)
@@ -9,29 +9,29 @@ def Run_Model(subset, inst, Time_Lim = True, Output = 0):
         print(subset)
         print("********************")
 
-
     if Time_Lim:
         model.setParam("TimeLimit", len(subset) * 3)
 
     # Instance data
-    A_all   = inst["A_feasible_ext"]
-    Pr      = inst["Pr"]
+    A_all     = inst["A_feasible_ext"]
+    Pr        = inst["Pr"]
     Dr_single = inst["Dr_single"]
-    e, l    = inst["e"], inst["l"]
-    d, q    = inst["d"], inst["q"]
-    t, c    = inst["t_ext"], inst["c_ext"]
-    depot   = inst["depot"]
-    sink    = inst["sink"]
+    e, l      = inst["e"], inst["l"]
+    d, q      = inst["d"], inst["q"]
+    t, c      = inst["t_ext"], inst["c_ext"]
+    depot     = inst["depot"]
+    sink      = inst["sink"]
 
     # Requests in this subproblem
-    R       = subset
-    Pickups = [i for r in R for i in Pr[r]]
-    Dels    = [Dr_single[r] for r in R]
-    N       = set(Pickups) | set(Dels)
-    V       = {depot, sink} | N
+    R         = subset
+    Pickups   = [i for r in R for i in Pr[r]]
+    Dels      = [Dr_single[r] for r in R]
+    N         = set(Pickups) | set(Dels)
+    V         = {depot, sink} | N
 
     # Induced subgraph
-    A_sub = [(i, j) for (i, j) in A_all if i in V and j in V and (i, j) in c and (i, j) in t]
+    A_sub = [(i, j) for (i, j) in A_all
+             if i in V and j in V and (i, j) in c and (i, j) in t]
 
     # Adjacency
     in_arcs  = {v: [] for v in V}
@@ -45,66 +45,186 @@ def Run_Model(subset, inst, Time_Lim = True, Output = 0):
     if dead_in or dead_out:
         raise ValueError(f"Subset yields isolated nodes — no-in={dead_in}, no-out={dead_out}")
 
+    # Map node -> request (for precedence cuts)
+    node_req = {}
+    for r in R:
+        for p in Pr[r]:
+            node_req[p] = r
+        node_req[Dr_single[r]] = r
+
     # Variables
     X = {(i, j): model.addVar(vtype=GRB.BINARY) for (i, j) in A_sub}
 
     # Objective: travel + service-at-origin
     model.setObjective(quicksum(X[i, j] * (c[i, j] + d.get(i, 0.0)) for (i, j) in A_sub), GRB.MINIMIZE)
 
-    # Anti 2-cycle (added once per unordered pair)
-    Anti2Cycle = {
-        (i, j): model.addConstr(X[i, j] + X[j, i] <= 1)
-        for (i, j) in A_sub if (j, i) in A_sub and i < j
-    }
+    # Degree = 1 on customer nodes (dicts)
+    DegIn  = {j: model.addConstr(quicksum(X[i, j] for (i, _) in in_arcs[j]) == 1) for j in N}
+    DegOut = {i: model.addConstr(quicksum(X[i, j] for (_, j) in out_arcs[i]) == 1) for i in N}
 
-    # Degree = 1 on customer nodes
-    DegIn =  {
-        j: model.addConstr(quicksum(X[i, j] for (i, _) in in_arcs[j]) == 1)
-        for j in N
-    }
-    DegOut = {
-        i: model.addConstr(quicksum(X[i, j] for (_, j) in out_arcs[i]) == 1)
-        for i in N
-    }
-
-    # Depot/sink flow
+    # Depot/sink flow (single route) — keep as dicts too
     model.addConstr(quicksum(X[i, sink] for (i, _) in in_arcs[sink]) ==
-                                quicksum(X[depot, j] for (_, j) in out_arcs[depot]))
-    
+                                           quicksum(X[depot, j] for (_, j) in out_arcs[depot]))
     model.addConstr(quicksum(X[depot, j] for (_, j) in out_arcs[depot]) == 1)
     model.addConstr(quicksum(X[j, sink]  for (j, _) in in_arcs[sink])  == 1)
 
-    # MTZ order variables and propagation
-    U_MAX = len(N) + 1
-    u = {v: model.addVar(vtype=GRB.CONTINUOUS, lb=0.0, ub=U_MAX) for v in V}
-    FixOrderEnds = {
-        depot: model.addConstr(u[depot] == 0.0),
-        sink:  model.addConstr(u[sink]  == U_MAX),
-    }
-    OrderProp = {
-        (i, j): model.addConstr(u[j] >= u[i] + 1 - U_MAX * (1 - X[i, j]))
-        for (i, j) in A_sub if i != sink and j != depot and i != j
-    }
+    # Lazy constraints instead of MTZ
+    model.Params.LazyConstraints = 1
 
-    # Pickup-before-delivery precedence
-    Precedence = {
-        (r, p): model.addConstr(u[Dr_single[r]] >= u[p] + 1)
-        for r in R for p in Pr[r]
-    }
+    # Optional cutoff as before
+    model.Params.Cutoff = float(l[sink])
 
-    # Defensive: forbid incoming to depot / outgoing from sink (only if arcs exist)
-    DepotGuards = {}
-    if in_arcs.get(depot, []):
-        DepotGuards["no_in_depot"] = model.addConstr(quicksum(X[i, depot] for (i, _) in in_arcs[depot]) == 0)
-    if out_arcs.get(sink, []):
-        DepotGuards["no_out_sink"] = model.addConstr(quicksum(X[sink, j] for (_, j) in out_arcs[sink]) == 0)
+    EPS = 1e-9
+    N_only = set(N)
 
-    # Early-stop on global lower bound vs. route limit
-    model.setParam("BestBdStop", float(l[sink]) + 1e-9)
+    def build_Sset(xvals):
+        """Return internal components (cycles) entirely within N, using hard 0/1 rounding."""
+        Sset = set()
+        succ = {}
+        for i in N_only:
+            outs = [(j, xvals.get((i, j), 0.0)) for (ii, j) in out_arcs.get(i, []) if j in N_only]
+            if not outs:
+                continue
+            j_best, v_best = max(outs, key=lambda z: z[1])
+            if v_best >= 1.0 - EPS:
+                succ[i] = j_best
 
-    model.optimize()
+        unvisited = set(N_only)
+        while unvisited:
+            u = unvisited.pop()
+            path, pos = [], {}
+            while True:
+                if u not in succ:
+                    break
+                if u in pos:
+                    k = pos[u]
+                    cycle = path[k:]
+                    if len(cycle) >= 2:
+                        Sset.add(frozenset(cycle))
+                    break
+                pos[u] = len(path)
+                path.append(u)
+                unvisited.discard(u)
+                u = succ[u]
+        return Sset
 
-    # Best bound guard for caller logic
+    model._sec_seen  = set()
+    model._prec_seen = set()
+
+    def subtour_callback(model, where):
+        if where != GRB.Callback.MIPSOL:
+            return
+
+        XV = model.cbGetSolution(X)
+
+        def sum_x_within(S):
+            return quicksum(X[i, j] for i in S for j in S if (i, j) in X)
+
+        def sum_x(from_set, to_set):
+            return quicksum(X[i, j] for i in from_set for j in to_set if (i, j) in X)
+
+        def add_cut_once(key, expr, rhs):
+            if key in model._prec_seen:
+                return False
+            model._prec_seen.add(key)
+            model.cbLazy(expr <= rhs)
+            return True
+
+        # ---- SECs on internal components ----
+        cut_added = False
+        Sset = build_Sset(XV)
+        for C in Sset:
+            key_sec = ("SEC", frozenset(C))
+            if key_sec not in model._sec_seen:
+                lhs_val = sum(XV.get((i, j), 0.0) for i in C for j in C if (i, j) in X)
+                rhs = len(C) - 1
+                if lhs_val > rhs + EPS:
+                    model._sec_seen.add(key_sec)
+                    model.cbLazy(sum_x_within(C) <= rhs)
+                    cut_added = True
+
+            # Set cut (all pickups of r in C but delivery not in C): on S=C∪{sink}
+            triggers = False
+            for r in R:
+                if set(Pr[r]).issubset(C) and (Dr_single[r] not in C):
+                    triggers = True
+                    break
+            if triggers:
+                S16 = set(C) | {sink}
+                key_16 = ("C16", frozenset(S16))
+                if key_16 not in model._prec_seen:
+                    lhs_val_16 = sum(XV.get((i, j), 0.0) for i in S16 for j in S16 if (i, j) in X)
+                    rhs_16 = len(S16) - 2
+                    if lhs_val_16 > rhs_16 + EPS:
+                        model._prec_seen.add(key_16)
+                        model.cbLazy(sum_x_within(S16) <= rhs_16)
+                        cut_added = True
+
+        # ---- Route-based precedence cuts: ----
+        if not cut_added:
+            start_arc = next((arc for arc in out_arcs[depot] if XV.get(arc, 0.0) > 0.5), None)
+
+            if start_arc is not None:
+                # Follow successors until sink or repetition
+                i0, j0 = start_arc
+                route = [i0, j0]
+                posr = {i0: 0, j0: 1}
+                seen = {i0, j0}
+                node = j0
+                for _ in range(len(V) + 2):
+                    if node == sink:
+                        break
+                    succs = [j for (_, j) in out_arcs.get(node, []) if XV.get((node, j), 0.0) > 0.5]
+                    if not succs:
+                        break
+                    j = succs[0]
+                    if j in seen:
+                        route.append(j)
+                        posr[j] = len(route) - 1
+                        break
+                    route.append(j)
+                    posr[j] = len(route) - 1
+                    seen.add(j)
+                    node = j
+
+                # Gather requests appearing on the route
+                reqs_on_route = {node_req[v] for v in route if v in node_req}
+
+                # (54): delivery appears before one of its pickups
+                for r in reqs_on_route:
+                    dr = Dr_single[r]
+                    if dr not in posr:
+                        continue
+                    idx_d = posr[dr]
+                    for p in Pr[r]:
+                        if p in posr and posr[p] > idx_d:
+                            S_nodes = route[idx_d + 1: posr[p]]
+                            if not S_nodes:
+                                continue
+                            key = ("54", dr, p, tuple(S_nodes))
+                            expr = (sum_x({dr}, S_nodes)
+                                    + sum_x_within(S_nodes)
+                                    + sum_x(S_nodes, {p}))
+                            add_cut_once(key, expr, len(S_nodes))
+
+                # (52): depot -> ... -> dr but not all pickups precede dr
+                for r in reqs_on_route:
+                    dr = Dr_single[r]
+                    if dr not in posr:
+                        continue
+                    idx_d = posr[dr]
+                    late_or_missing = any((p not in posr) or (posr[p] > idx_d) for p in Pr[r])
+                    if not late_or_missing:
+                        continue
+                    S_nodes = route[1:idx_d]  # strictly between depot and dr
+                    if not S_nodes:
+                        continue
+                    key = ("52", dr, tuple(S_nodes))
+                    expr = sum_x({depot}, S_nodes) + sum_x_within(S_nodes + [dr])
+                    add_cut_once(key, expr, len(S_nodes))
+
+    model.optimize(subtour_callback)
+
     try:
         best_bound = float(model.ObjBound)
     except Exception:

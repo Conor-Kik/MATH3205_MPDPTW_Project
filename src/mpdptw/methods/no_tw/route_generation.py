@@ -1,10 +1,8 @@
 from gurobipy import *
 from mpdptw.common.cli import parse_instance_argv
-from mpdptw.common.arf_solution_printer import print_solution_summary
 from mpdptw.common.parsers import build_milp_data
-from mpdptw.methods.arf.cluster_assignment import Run_Cluster_Assignment_Model
-from mpdptw.methods.no_tw.warm_start import warm_start_solution
 from mpdptw.methods.no_tw.route_time import Run_Model
+from mpdptw.common.no_tw_solution_printer import print_subset_solution
 from collections import defaultdict
 OUTPUT_REQ_MODEL = 0 # 1 Shows for request pair infeasibility model output
 OUTPUT_CLUSTER_MODEL = 0 # 1 Shows full cluster_model output
@@ -44,27 +42,23 @@ def Generate_Routes(path, model : Model):
     depot    = inst["depot"]
     sink     = inst["sink"]
     start_time = time.perf_counter()
-    routes = list(subsets_up_to_k(len(R), len(R)))
+    routes = list(subsets_up_to_k(len(R), len(R) ))
     costs = {}
     total = len(routes)
     print("Number of routes to check:", total)
-
     checkpoints = {int(total * p / 100) for p in range(5, 101, 5)}  # 5%, 10%, … 100%
-
     for idx, subset in enumerate(routes, start=1):
         _m, s_cost, arcs = Run_Model(subset, inst, False, OUTPUT)
-        if _m.Status in (GRB.USER_OBJ_LIMIT, GRB.INFEASIBLE):
-            continue
 
-        nodes = set()
-        for r in subset:
-            nodes.update(Pr[r])
-            nodes.add(Dr_single[r])       
+        if _m.Status not in (GRB.INFEASIBLE, GRB.CUTOFF):
+            nodes = set()
+            for r in subset:
+                nodes.update(Pr[r])
+                nodes.add(Dr_single[r])       
 
-        service_time = sum(d.get(node_id, 0.0) for node_id in nodes)
-        costs[subset] = s_cost - service_time
+            service_time = sum(d.get(node_id, 0.0) for node_id in nodes)
+            costs[subset] = s_cost - service_time
 
-        # progress printing
         if idx in checkpoints:
             pct = (idx / total) * 100
             print(f"Progress: {pct:.0f}% ({idx}/{total})")
@@ -85,12 +79,15 @@ def Generate_Routes(path, model : Model):
 
     model.optimize()
     end_time = time.perf_counter()
-    print(round(model.ObjVal,2))
-    print(f"Total time {end_time-start_time:.2f}")
+    
+
     for p in costs.keys():
         if Z[p].x > 0.5:
-            print(p, round(costs[p], 2))
-
+            print("\nRequests:", list(p),"Cost:", round(costs[p], 2))
+            print_subset_solution(inst, p)  
+    print("**********************************************8")
+    print(f"Total runtime {end_time-start_time:.2f}")
+    print("Obj Value",round(model.ObjVal,2))
 def main(argv=None):
     path, _ = parse_instance_argv(argv, default_filename="l_4_25_4.txt")
     model = Model("MPDTW")

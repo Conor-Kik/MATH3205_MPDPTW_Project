@@ -21,6 +21,19 @@ def _x(X, i, j):
         v = X.get((i, j), 0.0) if hasattr(X, "get") else 0.0
     return _val(v) if v is not None else 0.0
 
+def _s(S, i, default=float("nan")):
+    """Safe getter for start-time var S[i]; returns NaN if S is None or missing."""
+    if S is None:
+        return default
+    try:
+        v = S[i]
+    except Exception:
+        try:
+            v = S.get(i, default)
+        except Exception:
+            return default
+    return _val(v) if v is not None else default
+
 def _build_node_index(R, Pr, Dr, sink=None):
     node_type = {0: ("DepotStart", None)}
     if sink is not None:
@@ -78,14 +91,19 @@ def print_solution_summary(
     R,
     K,
     Pr, Dr,
-    X, S,           # X[i,j], S[i]
-    e, l, q,
+    X, S=None,      # X[i,j], S[i] (optional)
+    e=None, l=None, q=None,
     t=None,
     sink=None,
     Vs=None,
     Rq=None,
     d=None
 ):
+    # default empties for dict-like params that might be None
+    e = e or {}
+    l = l or {}
+    q = q or {}
+
     print("\n" + "="*76)
     print("SOLUTION SUMMARY (start depot 0, end depot = sink)")
     print("="*76)
@@ -114,24 +132,28 @@ def print_solution_summary(
         total_time = 0.0
         for idx, v in enumerate(route):
             typ, req = node_info.get(v, ("Other", None))
-            s_val = _val(S[v]) if v in S else float("nan")
+            s_val = _s(S, v)  # NaN if S is None/missing
             e_v = e.get(v, 0.0)
             l_v = l.get(v, 0.0)
             q_v = q.get(v, 0.0)
 
-            # Implied S at depot/sink if desired
+            # Implied S at depot/sink if desired (only if S present for the relevant nodes)
             if t is not None and v == 0 and idx + 1 < len(route):
                 j = route[idx + 1]
-                try:
-                    s_val = _val(S[j]) - float(t[(0, j)])
-                except Exception:
-                    pass
+                sj = _s(S, j)
+                if sj == sj:  # not NaN
+                    try:
+                        s_val = sj - float(t[(0, j)])
+                    except Exception:
+                        pass
             if t is not None and sink is not None and v == sink and idx > 0:
                 i = route[idx - 1]
-                try:
-                    s_val = _val(S[i]) + (d[i] if d is not None else 0.0) + float(t[(i, sink)])
-                except Exception:
-                    pass
+                si = _s(S, i)
+                if si == si:  # not NaN
+                    try:
+                        s_val = si + (d[i] if d is not None else 0.0) + float(t[(i, sink)])
+                    except Exception:
+                        pass
 
             # Travel time from previous node
             if t is not None and idx > 0:
@@ -156,8 +178,8 @@ def print_solution_summary(
     print(f"{'req':>4}  {'max S[pick]':>12}  {'S[del]':>10}  {'ok?':>5}")
     for r in R:
         dnode = _as_delivery_node(Dr[r])
-        max_pick = max((_val(S[p]) for p in Pr[r]), default=float('-inf'))
-        s_del = _val(S[dnode]) if dnode in S else float("nan")
+        max_pick = max((_s(S, p, float('-inf')) for p in Pr[r]), default=float('-inf'))
+        s_del = _s(S, dnode)
         ok = "Y" if (s_del == s_del and s_del + 1e-6 >= max_pick) else "NO"
         print(f"{r:>4}  {max_pick:12.2f}  {s_del:10.2f}  {ok:>5}")
 

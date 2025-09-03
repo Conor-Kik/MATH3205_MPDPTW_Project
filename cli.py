@@ -21,8 +21,6 @@ REGISTRY: Dict[str, Dict[str, str]] = {
        "B": "mpdptw.methods.arf.Benders_Decomp:main", 
     },
     "no_tw": {
-    "baseline": "mpdptw.methods.no_tw.MPDTW_Solver:main", 
-    "ti": "mpdptw.methods.no_tw.MPDTW_Solver_Two:main", 
     "rg": "mpdptw.methods.no_tw.route_generation:main", 
     },
 }
