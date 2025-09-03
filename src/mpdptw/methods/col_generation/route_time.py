@@ -28,7 +28,7 @@ def Run_Model(subset, inst, Time_Lim=True, Output=0, Time_Window = False):
     Dels      = [Dr_single[r] for r in R]
     N         = set(Pickups) | set(Dels)
     V         = {depot, sink} | N
-
+    Q         = inst["Q"]
     # Induced subgraph
     A_sub = [(i, j) for (i, j) in A_all
              if i in V and j in V and (i, j) in c and (i, j) in t]
@@ -55,7 +55,7 @@ def Run_Model(subset, inst, Time_Lim=True, Output=0, Time_Window = False):
     # Variables
     X = {(i, j): model.addVar(vtype=GRB.BINARY) for (i, j) in A_sub}
 
-    # Objective: travel + service-at-origin
+# Objective: travel + service-at-origin
     model.setObjective(quicksum(X[i, j] * (c[i, j] + d.get(i, 0.0)) for (i, j) in A_sub), GRB.MINIMIZE)
 
     if Time_Window:
@@ -79,8 +79,6 @@ def Run_Model(subset, inst, Time_Lim=True, Output=0, Time_Window = False):
                     model.addConstr(S[Dr_single[r]] >= S[i] + d[i] + t[i, Dr_single[r]])
                     for r in R for i in Pr[r]}
         
-
-
     # Degree = 1 on customer nodes (dicts)
     DegIn  = {j: model.addConstr(quicksum(X[i, j] for (i, _) in in_arcs[j]) == 1) for j in N}
     DegOut = {i: model.addConstr(quicksum(X[i, j] for (_, j) in out_arcs[i]) == 1) for i in N}
@@ -229,6 +227,7 @@ def Run_Model(subset, inst, Time_Lim=True, Output=0, Time_Window = False):
                                     + sum_x_within(S_nodes)
                                     + sum_x(S_nodes, {p}))
                             add_cut_once(key, expr, len(S_nodes))
+                            cut_added = True
 
                 # (52): depot -> ... -> dr but not all pickups precede dr
                 for r in reqs_on_route:
@@ -245,6 +244,7 @@ def Run_Model(subset, inst, Time_Lim=True, Output=0, Time_Window = False):
                     key = ("52", dr, tuple(S_nodes))
                     expr = sum_x({depot}, S_nodes) + sum_x_within(S_nodes + [dr])
                     add_cut_once(key, expr, len(S_nodes))
+                    cut_added = True
 
     model.optimize(subtour_callback)
 

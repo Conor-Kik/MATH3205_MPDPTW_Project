@@ -12,6 +12,7 @@ COL_GEN_OUTPUT = 0
 
 
 
+
 def subsets_up_to_k(R, K):
     for r in range(1, min(R, K) + 1):
         for comb in combinations(range(R), r): 
@@ -24,16 +25,11 @@ def Generate_Routes(instance : str, model : Model):
     path = Path(instance)
     filename = path.name
     Time_Window = not filename.startswith("w")
-    print(path)
-    V        = inst["V_ext"]
-    A        = inst["A_feasible_ext"]
-    N        = inst["N"]
     R        = inst["R"]
     Pr       = inst["Pr"]
-    Dr       = inst["Dr"]
     Dr_single= inst["Dr_single"]
 
-
+    EPS      = 1e-9
     K        = inst["K"]
     Q        = inst["Q"]
     nodes_to_reqs = inst["Nodes_To_Reqs"]
@@ -47,6 +43,26 @@ def Generate_Routes(instance : str, model : Model):
 
     depot    = inst["depot"]
     sink     = inst["sink"]
+
+
+    def is_capacity_ok(arcs):
+
+        succ = {i: j for (i, j) in arcs}
+        route = [depot]
+        cur = depot
+        for _ in range(len(arcs) + 2): 
+            if cur == sink:
+                break
+            cur = succ[cur]
+            route.append(cur)
+        load = 0.0
+        for v in route:
+            load += q.get(v, 0.0)
+            if load > Q + EPS:
+                return False
+        return True
+
+
     start_time = time.perf_counter()
     routes = list(subsets_up_to_k(len(R), len(R) ))
     costs = {}
@@ -57,7 +73,11 @@ def Generate_Routes(instance : str, model : Model):
         _m, s_cost, arcs = Run_Model(subset, inst, False, COL_GEN_OUTPUT,Time_Window)
 
         if _m.Status not in (GRB.INFEASIBLE, GRB.CUTOFF):
+            if not is_capacity_ok(arcs):
+                continue 
+
             nodes = set()
+
             for r in subset:
                 nodes.update(Pr[r])
                 nodes.add(Dr_single[r])       
