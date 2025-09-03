@@ -20,8 +20,8 @@ REGISTRY: Dict[str, Dict[str, str]] = {
        "W": "mpdptw.methods.arf.W_instance_Model:main", 
        "B": "mpdptw.methods.arf.Benders_Decomp:main", 
     },
-    "no_tw": {
-    "rg": "mpdptw.methods.no_tw.route_generation:main", 
+    "col_gen": {
+    "baseline": "mpdptw.methods.col_generation.route_generation:main", 
     },
 }
 

@@ -81,15 +81,6 @@ def Run_Model(subset, inst, Time_Lim=True, Output=0, Time_Window = False):
         
 
 
-
-
-
-
-
-
-
-
-
     # Degree = 1 on customer nodes (dicts)
     DegIn  = {j: model.addConstr(quicksum(X[i, j] for (i, _) in in_arcs[j]) == 1) for j in N}
     DegOut = {i: model.addConstr(quicksum(X[i, j] for (_, j) in out_arcs[i]) == 1) for i in N}

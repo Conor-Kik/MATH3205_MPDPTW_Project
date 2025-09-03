@@ -3,15 +3,12 @@ from mpdptw.common.cli import parse_instance_argv
 from mpdptw.common.parsers import build_milp_data
 from mpdptw.methods.col_generation.route_time import Run_Model
 from mpdptw.common.col_gen_solution_printer import print_subset_solution
-from collections import defaultdict
-OUTPUT_REQ_MODEL = 0 # 1 Shows for request pair infeasibility model output
-OUTPUT_CLUSTER_MODEL = 0 # 1 Shows full cluster_model output
-PREPROCESSING_CUTOFF = 10 #Amount of time that cluster assignment model termininates (seconds)
-PLOT_CLUSTERS = 1#1 Show plot of warm_start prediction
 import time
 from itertools import combinations
-OUTPUT = 0
 from pathlib import Path
+
+
+COL_GEN_OUTPUT = 0
 
 
 
@@ -57,7 +54,7 @@ def Generate_Routes(instance : str, model : Model):
     print("Number of routes to check:", total)
     checkpoints = {int(total * p / 100) for p in range(5, 101, 5)}  # 5%, 10%, … 100%
     for idx, subset in enumerate(routes, start=1):
-        _m, s_cost, arcs = Run_Model(subset, inst, False, OUTPUT,Time_Window)
+        _m, s_cost, arcs = Run_Model(subset, inst, False, COL_GEN_OUTPUT,Time_Window)
 
         if _m.Status not in (GRB.INFEASIBLE, GRB.CUTOFF):
             nodes = set()

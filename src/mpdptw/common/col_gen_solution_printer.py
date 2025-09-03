@@ -1,5 +1,5 @@
 # --- minimal safe getters / route extraction ---
-from mpdptw.methods.no_tw.route_time import Run_Model
+from mpdptw.methods.col_generation.route_time import Run_Model
 def _as_delivery_node(d):
     if isinstance(d, (list, tuple, set)):
         return next(iter(d))
