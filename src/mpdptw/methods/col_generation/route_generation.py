@@ -12,14 +12,18 @@ COL_GEN_OUTPUT = 0
 
 
 
-
-def subsets_up_to_k(R, K):
+def subsets_up_to_k(R, K, W=None):
+    bad_pairs = {frozenset(p) for p in W}
     for r in range(1, min(R, K) + 1):
-        for comb in combinations(range(R), r): 
-            yield frozenset(comb)
-
+        for comb in combinations(range(R), r):
+            s = frozenset(comb)
+            # Skip if any bad pair is a subset of s
+            if any(pair <= s for pair in bad_pairs):
+                continue
+            yield s
 
 def Generate_Routes(instance : str, model : Model):
+    start_time = time.perf_counter()
     inst = build_milp_data(str(instance))
     
     path = Path(instance)
@@ -30,20 +34,13 @@ def Generate_Routes(instance : str, model : Model):
     Dr_single= inst["Dr_single"]
 
     EPS      = 1e-9
-    K        = inst["K"]
     Q        = inst["Q"]
-    nodes_to_reqs = inst["Nodes_To_Reqs"]
-    e        = inst["e"]
-    l        = inst["l"]
+    W        = inst["W"]
     d        = inst["d"]
     q        = inst["q"]
-    t        = inst["t_ext"]
-    c        = inst["c_ext"]
-    V_ext    = inst["V_ext"]
 
     depot    = inst["depot"]
     sink     = inst["sink"]
-
 
     def is_capacity_ok(arcs):
 
@@ -63,11 +60,12 @@ def Generate_Routes(instance : str, model : Model):
         return True
 
 
-    start_time = time.perf_counter()
-    routes = list(subsets_up_to_k(len(R), len(R) ))
+    
+    routes = list(subsets_up_to_k(len(R), len(R), W))
     costs = {}
     total = len(routes)
-    print("Number of routes to check:", total)
+    print("Number of columns to generate:", total)
+    print("Beginning Column Generation:")
     checkpoints = {int(total * p / 100) for p in range(5, 101, 5)}  # 5%, 10%, … 100%
     for idx, subset in enumerate(routes, start=1):
         _m, s_cost, arcs = Run_Model(subset, inst, False, COL_GEN_OUTPUT,Time_Window)
@@ -113,7 +111,8 @@ def Generate_Routes(instance : str, model : Model):
             print_subset_solution(inst, p)  
     print("**********************************************")
     print(f"Total runtime {end_time-start_time:.2f}")
-    print("Obj Value",round(model.ObjVal,2))
+    print("Obj Value",round(model.ObjVal,3))
+    print("**********************************************")
 def main(argv=None):
     path, _ = parse_instance_argv(argv, default_filename="l_4_25_4.txt")
     model = Model("MPDTW")

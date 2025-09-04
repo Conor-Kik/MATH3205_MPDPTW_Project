@@ -68,13 +68,6 @@ def Run_Model(subset, inst, Time_Lim=True, Output=0, Time_Window = False):
         }
         TimeFeasEarliest = {i: model.addConstr(S[i] >= Earliest[i]) for i in V}
         TimeFeasLatest   = {i: model.addConstr(S[i] <= Latest[i])   for i in V}        
-        #TimeWindowFeas = {(i, j): model.addConstr(S[j]>= S[i] + d[i] + t[i, j] - M_ij[i,j]*(1-X[i, j])) for (i, j) in A}
-        
-
-        #TimeFeasLatest = {i : model.addConstr(S[i] <= l[i]) for i in V}
-        
-        #TimeFeasEarliest = {i : model.addConstr(S[i] >= e[i]) for i in V}
-
         RequestPrec = {(i, r):
                     model.addConstr(S[Dr_single[r]] >= S[i] + d[i] + t[i, Dr_single[r]])
                     for r in R for i in Pr[r]}
