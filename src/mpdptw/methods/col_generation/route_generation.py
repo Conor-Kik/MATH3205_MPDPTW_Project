@@ -11,16 +11,38 @@ from pathlib import Path
 COL_GEN_OUTPUT = 0
 
 
+def subsets_up_to_k(R, K, W=()):
+    # Build conflict adjacency: adj[x] = {y that conflicts with x}
+    adj = [set() for _ in range(R)]
+    for a, b in W:
+        adj[a].add(b)
+        adj[b].add(a)
 
-def subsets_up_to_k(R, K, W=None):
-    bad_pairs = {frozenset(p) for p in W}
-    for r in range(1, min(R, K) + 1):
-        for comb in combinations(range(R), r):
-            s = frozenset(comb)
-            # Skip if any bad pair is a subset of s
-            if any(pair <= s for pair in bad_pairs):
+    # Heuristic: consider high-conflict nodes earlier to prune sooner
+    nodes = sorted(range(R), key=lambda x: -len(adj[x]))
+
+    curr = []
+
+    def backtrack(start, banned):
+        # Emit current subset (sizes 1..K)
+        if 1 <= len(curr) <= K:
+            yield frozenset(curr)
+        if len(curr) == K:
+            return
+
+        for i in range(start, R):
+            v = nodes[i]
+            if v in banned:
                 continue
-            yield s
+            # Add v; update banned with its conflicts
+            curr.append(v)
+            new_banned = banned | adj[v]
+            # Note: we don't need to add 'v' itself to banned because
+            # we move forward with 'start=i+1', preventing reuse.
+            yield from backtrack(i + 1, new_banned)
+            curr.pop()
+
+    yield from backtrack(0, set())
 
 def Generate_Routes(instance : str, model : Model):
     start_time = time.perf_counter()
