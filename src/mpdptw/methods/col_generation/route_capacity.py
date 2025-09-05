@@ -1,6 +1,6 @@
 from gurobipy import *
 from mpdptw.common.big_M import tight_bigM
-def Run_Time_Model(subset, inst, Time_Lim=True, Output=0, Time_Window = False):
+def Run_Capacity_Model(subset, inst, Time_Lim=True, Output=0, Time_Window = False):
     model = Model("BSP")
     if Output == 0:
         model.setParam("OutputFlag", 0)
@@ -54,6 +54,24 @@ def Run_Time_Model(subset, inst, Time_Lim=True, Output=0, Time_Window = False):
 
     # Variables
     X = {(i, j): model.addVar(vtype=GRB.BINARY) for (i, j) in A_sub}
+
+    # Load on arcs after departing i along (i,j)
+    F = {(i, j): model.addVar(vtype=GRB.CONTINUOUS, lb=0.0, ub=Q) for (i, j) in A_sub}
+
+    # If arc is not used, its flow must be 0; otherwise flow ≤ Q
+    CapCouple = {(i, j): model.addConstr(F[i, j] <= Q * X[i, j]) for (i, j) in A_sub}
+
+    # Flow conservation at each customer node v:
+    # sum_out F - sum_in F == q[v]
+    FlowBal = {
+        v: model.addConstr(
+            quicksum(F[v, j] for (_, j) in out_arcs[v]) -
+            quicksum(F[i, v] for (i, _) in in_arcs[v]) == q[v]
+        )
+        for v in N
+    }
+
+    ArriveEmpty = model.addConstr(quicksum(F[i, sink] for (i, _) in in_arcs[sink]) == 0.0)
 
 # Objective: travel + service-at-origin
     model.setObjective(quicksum(X[i, j] * (c[i, j] + d.get(i, 0.0)) for (i, j) in A_sub), GRB.MINIMIZE)

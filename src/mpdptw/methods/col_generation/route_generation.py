@@ -1,15 +1,14 @@
 from gurobipy import *
 from mpdptw.common.cli import parse_instance_argv
 from mpdptw.common.parsers import build_milp_data
-from mpdptw.methods.col_generation.route_time import Run_Model
+from mpdptw.methods.col_generation.route_time import Run_Time_Model
+from mpdptw.methods.col_generation.route_capacity import Run_Capacity_Model
 from mpdptw.common.col_gen_solution_printer import print_subset_solution
 import time
-from itertools import combinations
 from pathlib import Path
 
 
 COL_GEN_OUTPUT = 0
-
 
 def subsets_up_to_k(R, K, W=()):
     # Build conflict adjacency: adj[x] = {y that conflicts with x}
@@ -54,13 +53,15 @@ def Generate_Routes(instance : str, model : Model):
     R        = inst["R"]
     Pr       = inst["Pr"]
     Dr_single= inst["Dr_single"]
-
+    t        = inst["t_ext"]
+    l        = inst["l"]
+    N        = inst["N"]
     EPS      = 1e-9
+    A        = inst["A_feasible_ext"]  
     Q        = inst["Q"]
     W        = inst["W"]
     d        = inst["d"]
     q        = inst["q"]
-
     depot    = inst["depot"]
     sink     = inst["sink"]
 
@@ -90,11 +91,14 @@ def Generate_Routes(instance : str, model : Model):
     print("Beginning Column Generation:")
     checkpoints = {int(total * p / 100) for p in range(5, 101, 5)}  # 5%, 10%, … 100%
     for idx, subset in enumerate(routes, start=1):
-        _m, s_cost, arcs = Run_Model(subset, inst, False, COL_GEN_OUTPUT,Time_Window)
+        _m, s_cost, arcs = Run_Time_Model(subset, inst, False, COL_GEN_OUTPUT,Time_Window)
 
         if _m.Status not in (GRB.INFEASIBLE, GRB.CUTOFF):
             if not is_capacity_ok(arcs):
-                continue 
+                _m, s_cost, arcs = Run_Capacity_Model(subset, inst, False, COL_GEN_OUTPUT,Time_Window)
+                if  _m.Status in (GRB.INFEASIBLE, GRB.CUTOFF):
+                    continue 
+
 
             nodes = set()
 
@@ -108,7 +112,8 @@ def Generate_Routes(instance : str, model : Model):
         if idx in checkpoints:
             pct = (idx / total) * 100
             print(f"Progress: {pct:.0f}% ({idx}/{total})")
-
+    
+    print("Total valid routes:", len(costs))
     result = {i: [] for i in range(len(R))}
     for s in costs.keys():
         for elem in s:

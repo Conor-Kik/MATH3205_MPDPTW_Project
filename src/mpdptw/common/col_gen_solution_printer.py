@@ -1,5 +1,6 @@
 # --- minimal safe getters / route extraction ---
-from mpdptw.methods.col_generation.route_time import Run_Model
+from mpdptw.methods.col_generation.route_time import Run_Time_Model
+from mpdptw.methods.col_generation.route_capacity import Run_Capacity_Model
 def _as_delivery_node(d):
     if isinstance(d, (list, tuple, set)):
         return next(iter(d))
@@ -103,10 +104,36 @@ def print_subset_solution(inst, p_subset):
     q     = inst.get("q", {})
     d     = inst.get("d", {})
     t     = inst.get("t_ext", {})
+    Q     = inst["Q"]
+    EPS   = 1e-6
     sink  = inst.get("sink")
 
+    def is_capacity_ok(arcs):
+
+        succ = {i: j for (i, j) in arcs}
+        route = [0]
+        cur = 0
+        for _ in range(len(arcs) + 2): 
+            if cur == sink:
+                break
+            cur = succ[cur]
+            route.append(cur)
+        load = 0.0
+        for v in route:
+            load += q.get(v, 0.0)
+            if load > Q + EPS:
+                return False
+        return True
+
+
     # solve the subproblem again to “turn arcs on”
-    _m, s_cost, arcs = Run_Model(p_subset, inst, False)
+    _m, s_cost, arcs = Run_Time_Model(p_subset, inst, False)
+    if not is_capacity_ok(arcs):
+        _m, s_cost, arcs = Run_Capacity_Model(p_subset, inst, False)
+
+
+    
+    
     X = _coerce_X(arcs)
 
     # reconstruct routes
