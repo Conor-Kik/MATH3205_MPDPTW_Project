@@ -87,7 +87,7 @@ def _build_node_index(R, Pr, Dr, sink=None):
 
 # --- the one function you asked for ---
 
-def print_subset_solution(inst, p_subset):
+def print_subset_solution(inst, p_subset, Capacity_Constraint = 0):
     """
     Re-run the subproblem for chosen subset p_subset and print a compact summary.
     Prints **travel-only objective** (sum of t[i,j] on chosen arcs), and also
@@ -128,8 +128,9 @@ def print_subset_solution(inst, p_subset):
 
     # solve the subproblem again to “turn arcs on”
     _m, s_cost, arcs = Run_Time_Model(p_subset, inst, False)
-    if not is_capacity_ok(arcs):
-        _m, s_cost, arcs = Run_Capacity_Model(p_subset, inst, False)
+    if Capacity_Constraint:
+        if not is_capacity_ok(arcs):
+            _m, s_cost, arcs = Run_Capacity_Model(p_subset, inst, False)
 
 
     

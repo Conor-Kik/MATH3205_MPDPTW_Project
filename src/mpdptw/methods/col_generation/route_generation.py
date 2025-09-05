@@ -7,7 +7,7 @@ from mpdptw.common.col_gen_solution_printer import print_subset_solution
 import time
 from pathlib import Path
 
-
+VEHICLE_CAPACITY = 0 #1 add vehicle capacity constraints
 COL_GEN_OUTPUT = 0
 
 def subsets_up_to_k(R, K, W=()):
@@ -94,10 +94,11 @@ def Generate_Routes(instance : str, model : Model):
         _m, s_cost, arcs = Run_Time_Model(subset, inst, False, COL_GEN_OUTPUT,Time_Window)
 
         if _m.Status not in (GRB.INFEASIBLE, GRB.CUTOFF):
-            if not is_capacity_ok(arcs):
-                _m, s_cost, arcs = Run_Capacity_Model(subset, inst, False, COL_GEN_OUTPUT,Time_Window)
-                if  _m.Status in (GRB.INFEASIBLE, GRB.CUTOFF):
-                    continue 
+            if VEHICLE_CAPACITY:
+                if not is_capacity_ok(arcs):
+                    _m, s_cost, arcs = Run_Capacity_Model(subset, inst, False, COL_GEN_OUTPUT,Time_Window)
+                    if  _m.Status in (GRB.INFEASIBLE, GRB.CUTOFF):
+                        continue 
 
 
             nodes = set()
@@ -135,7 +136,7 @@ def Generate_Routes(instance : str, model : Model):
     for p in costs.keys():
         if Z[p].x > 0.5:
             print("\nRequests:", list(p),"Cost:", round(costs[p], 2))
-            print_subset_solution(inst, p)  
+            print_subset_solution(inst, p, VEHICLE_CAPACITY)  
     print("**********************************************")
     print(f"Total runtime {end_time-start_time:.2f}")
     print("Obj Value",round(model.ObjVal,3))
