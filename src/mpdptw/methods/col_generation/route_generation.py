@@ -149,9 +149,10 @@ def Generate_Routes(instance: str, model: Model):
     
     for p in costs.keys():
         if Z[p].x > 0.5:
-            print("\nRequests:", list(p),"Cost:", round(costs[p], 2))
             if PRINT_ROUTES:
                 print_subset_solution(inst, p, VEHICLE_CAPACITY)  
+            else:
+                print("\nRequests:", list(p),"Cost:", round(costs[p], 2))
     print("**********************************************")
     print(f"Total runtime {end_time-start_time:.2f}")
     print("Obj Value",round(model.ObjVal,3))

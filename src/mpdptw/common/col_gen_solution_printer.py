@@ -218,17 +218,5 @@ def print_subset_solution(inst, p_subset, Capacity_Constraint = 0):
             print(f"{v:>5}  {typ:>10}  {req_str:>4}  {s_str:>10}   {el_str:>13}  {q_v:6.2f}  {tprev_str:>11}")
         print(f"{'':>56}Total travel: {round(total_time, 2)}")
 
-    # arc listings
-    print("\nCHOSEN ARCS (i -> j) with X[i,j] ≈ 1")
-    print("-"*76)
-    print(chosen_arcs)
-
-    print("\nCHOSEN ARCS WITH TRAVEL TIMES t[i,j]")
-    print("-"*76)
-    arcs_with_t = []
-    for (i, j) in chosen_arcs:
-        tij = t.get((i, j))
-        arcs_with_t.append((i, j, None if tij is None else round(float(tij), 2)))
-    print(arcs_with_t)
 
     print("="*76)
