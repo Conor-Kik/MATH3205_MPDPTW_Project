@@ -32,11 +32,10 @@ The entry point is `cli.py` at the project root.
 ### General usage
 
 ```bash
-python cli.py <method> <approach> <instance_filename>
+python cli.py <method> <instance_filename>
 ```
 
 - `<method>` → the method name (e.g., `two_index`)
-- `<approach>` → the specific solver/approach file
 - `<instance_filename>` → the instance file located inside `mpdtw_instances_2019/`
 
 ---
