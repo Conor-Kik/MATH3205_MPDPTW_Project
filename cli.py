@@ -5,24 +5,12 @@ from typing import Dict
 # Ensure src/ is importable
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
 
-# Registry: map (method, approach) -> "module.path:callable"
-REGISTRY: Dict[str, Dict[str, str]] = {
-    "two_index": {
-        "baseline": "mpdptw.methods.two_index.MPDTW_Solver_Two:main",
-
-    },
-    "three_index": {
-       "baseline": "mpdptw.methods.three_index.MPDTW_Solver:main", 
-       "extra": "mpdptw.methods.three_index.MPDTW_Solver_Three:main", 
-    },
-    "arf": {
-       "baseline": "mpdptw.methods.arf.MPDTW_Solver_Arf:main", 
-       "W": "mpdptw.methods.arf.W_instance_Model:main", 
-       "B": "mpdptw.methods.arf.Benders_Decomp:main", 
-    },
-    "col_gen": {
-    "baseline": "mpdptw.methods.col_generation.route_generation:main", 
-    },
+# Registry: map method -> "module.path:callable"
+REGISTRY: Dict[str, str] = {
+    "two_index": "mpdptw.methods.two_index.MPDTW_Solver_Two:main",
+    "three_index": "mpdptw.methods.three_index.MPDTW_Solver:main",
+    "arf": "mpdptw.methods.arf.MPDTW_Solver_Arf:main",
+    "col_gen": "mpdptw.methods.col_generation.route_generation:main",
 }
 
 def load_entry(entry: str):
@@ -36,12 +24,12 @@ def load_entry(entry: str):
     return func
 
 def main():
-    # Parse only the method/approach here; defer the rest to the solver.
-    if len(sys.argv) < 2 or sys.argv[1] in {"-h", "--help"}:
-        print("Usage: python cli.py <method> <approach> [solver-args...]")
-        print("\nAvailable:")
-        for m, approaches in REGISTRY.items():
-            print(f"  {m}: {', '.join(sorted(approaches.keys())) or '(none)'}")
+    # Expect at least <method> <instance_file>
+    if len(sys.argv) < 3 or sys.argv[1] in {"-h", "--help"}:
+        print("Usage: python cli.py <method> <instance_filename> [solver-args...]")
+        print("\nAvailable methods:")
+        for m in REGISTRY.keys():
+            print(f"  {m}")
         sys.exit(0)
 
     method = sys.argv[1]
@@ -49,19 +37,9 @@ def main():
         print(f"Unknown method '{method}'. Known: {', '.join(REGISTRY.keys())}")
         sys.exit(2)
 
-    if len(sys.argv) < 3:
-        print(f"Missing approach for method '{method}'. Options: {', '.join(REGISTRY[method].keys()) or '(none)'}")
-        sys.exit(2)
-
-    approach = sys.argv[2]
-    if approach not in REGISTRY[method]:
-        print(f"Unknown approach '{approach}' for method '{method}'. "
-              f"Options: {', '.join(REGISTRY[method].keys())}")
-        sys.exit(2)
-
-    # Everything after method + approach belongs to the solver
-    solver_argv = sys.argv[3:]
-    entry = REGISTRY[method][approach]
+    # Everything after <method> is passed to the solver
+    solver_argv = sys.argv[2:]
+    entry = REGISTRY[method]
     func = load_entry(entry)
 
     # Call the solver's main, forwarding its argv

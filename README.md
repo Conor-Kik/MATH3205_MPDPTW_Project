@@ -21,7 +21,6 @@ MATH3205_MPDPTW_Project/
 ├── docs/                           # Project report, LaTeX documentation, papers used
 ├── cli.py                          # CLI entrypoint
 └── README.txt                      # This file
-
 ```
 
 ---
@@ -40,19 +39,33 @@ python cli.py <method> <approach> <instance_filename>
 - `<approach>` → the specific solver/approach file
 - `<instance_filename>` → the instance file located inside `mpdtw_instances_2019/`
 
-### Example
+---
 
-```bash
-python cli.py two_index baseline l_4_25_1.txt
-```
+### Available Methods
 
-This will:
-1. Load `mpdtw/methods/two_index/MPDTW_Solver.py`
-2. Run it on the instance `mpdtw_instances_2019/l_4_25_1.txt`
+Currently implemented methods include:
+
+- `two_index` → Two-index formulation solver  
+- `three_index` → Three-index formulation solver  
+- `arf` → Asymmetric representatives formulation 
+- `col_gen` → Column Generation approach  
+
+Each method has its own subdirectory under `src/mpdptw/methods/`.
 
 ---
 
-##  Documentation
+### Example Commands
+
+```bash
+python cli.py two_index MPDTW_Solver l_4_25_1.txt
+python cli.py three_index ThreeIndexSolver l_6_50_3.txt
+python cli.py arf ARF_Solver l_8_75_2.txt
+python cli.py col_gen ColGenSolver l_10_100_1.txt
+```
+
+---
+
+## Documentation
 
 - All project reports, LaTeX sources, and reference papers are stored in the `docs/` folder.  
 
@@ -60,7 +73,5 @@ This will:
 
 ## Notes
 
-- Always run from the **project root** so paths resolve correctly.
-- The project uses **Gurobi** as the solver, so ensure it is properly installed and licensed.
-
-#LINK: https://docs.google.com/document/d/1jl7S_PJwlgwySusIVRbyNbZ9_U9-sgJS0ANAVPBX3jw/edit?usp=sharing
+- Always run from the **project root** so paths resolve correctly.  
+- The project uses **Gurobi** as the solver, so ensure it is properly installed and licensed.  
