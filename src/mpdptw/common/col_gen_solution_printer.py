@@ -1,6 +1,5 @@
 # --- minimal safe getters / route extraction ---
-from mpdptw.methods.col_generation.route_time import Run_Time_Model
-from mpdptw.methods.col_generation.route_capacity import Run_Capacity_Model
+from mpdptw.common.route_time import Run_Time_Model
 def _as_delivery_node(d):
     if isinstance(d, (list, tuple, set)):
         return next(iter(d))
@@ -130,7 +129,7 @@ def print_subset_solution(inst, p_subset, Capacity_Constraint = 0):
     _m, s_cost, arcs = Run_Time_Model(p_subset, inst, False)
     if Capacity_Constraint:
         if not is_capacity_ok(arcs):
-            _m, s_cost, arcs = Run_Capacity_Model(p_subset, inst, False)
+            _m, s_cost, arcs = Run_Time_Model(p_subset, inst, False, Capacity_Constraint=True)
 
 
     
