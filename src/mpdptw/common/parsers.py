@@ -1,9 +1,12 @@
 # ==========================
 # MPDTW parser
 # ==========================
+import itertools
 from pathlib import Path
-from src.mpdptw.common.W_set_Model import Infeasible_Req_Pairs
 
+from gurobipy import GRB
+from src.mpdptw.common.W_set_Model import Infeasible_Req_Pairs
+from mpdptw.common.route_time import Run_Time_Model
 
 OUTPUT_W_SET_MODEL = 0
 # ── Line parsers ───────────────────────────────────────────────────────────────
@@ -166,18 +169,20 @@ def build_milp_data(filename, cost_equals_time=True, speed=1.0):
     inst = build_dictionary(filename, cost_equals_time=True, speed=1.0)
     r = inst["Nodes_To_Reqs"]
     A_feas = inst["A_feasible_ext"]
-    sink = inst["sink"]
-    path = Path(filename)
-    if path.name[0] != 'w':# or path.name[2] != '4':
-        W = Infeasible_Req_Pairs(inst, output_flag=OUTPUT_W_SET_MODEL)
-        inst["W"] = W
-        inst["A_feasible_ext"] = [
-            (i, j) for (i, j) in A_feas
-            if (r[i], r[j]) not in W and (r[j], r[i]) not in W
-        ]
-    else:
-        inst["W"] = []
+    R = inst["R"]
+    W = []
+    for r1, r2 in itertools.combinations(R, 2):
+        _m, _, _ = Run_Time_Model([r1,r2], inst, Time_Window=True)
+        feasible = _m.Status == GRB.OPTIMAL
+        if not feasible:
+            W.append((r1, r2))
 
+
+    inst["W"] = W
+    inst["A_feasible_ext"] = [
+        (i, j) for (i, j) in A_feas
+        if (r[i], r[j]) not in W and (r[j], r[i]) not in W
+    ]
         
     print(f"-----------\nARCS CUTS: {len(inst["A"]) - len(inst["A_feasible_ext"])}\n-----------")
     return inst
@@ -220,7 +225,6 @@ def build_dictionary(filename, cost_equals_time=True, speed=1.0):
         tij = _euclid_time(coords[i], coords[j], speed)
         t[(i, j)] = tij
         c[(i, j)] = tij if cost_equals_time else tij
-
     # Extended graph with distinct sink
     sink, V_ext, A_ext_no_loops, t_ext, c_ext, coords_ext, e_ext, l_ext, d_ext = \
         _build_extended_graph_with_sink(V, coords, e, l, d, _euclid_time, speed=speed)
