@@ -98,20 +98,20 @@ def Run_Time_Model(subset, inst, Time_Lim=False, Output=0, Time_Window = False, 
                     model.addConstr(S[Dr_single[r]] >= S[i] + d[i] + t[i, Dr_single[r]])
                     for r in R for i in Pr[r]}
         
-    # Degree = 1 on customer nodes (dicts)
+    # Degree = 1 on customer nodes 
     DegIn  = {j: model.addConstr(quicksum(X[i, j] for (i, _) in in_arcs[j]) == 1) for j in N}
     DegOut = {i: model.addConstr(quicksum(X[i, j] for (_, j) in out_arcs[i]) == 1) for i in N}
 
-    # Depot/sink flow (single route) — keep as dicts too
+    # Depot/sink flow 
     model.addConstr(quicksum(X[i, sink] for (i, _) in in_arcs[sink]) ==
                                            quicksum(X[depot, j] for (_, j) in out_arcs[depot]))
     model.addConstr(quicksum(X[depot, j] for (_, j) in out_arcs[depot]) == 1)
     model.addConstr(quicksum(X[j, sink]  for (j, _) in in_arcs[sink])  == 1)
 
-    # Lazy constraints instead of MTZ
+
     model.Params.LazyConstraints = 1
 
-    # Optional cutoff as before
+
     model.Params.Cutoff = float(l[sink])
 
     EPS = 1e-9
@@ -150,7 +150,6 @@ def Run_Time_Model(subset, inst, Time_Lim=False, Output=0, Time_Window = False, 
 
     model._sec_seen  = set()
     model._seen = set()
-
     def subtour_callback(model, where):
         if where != GRB.Callback.MIPSOL:
             return
