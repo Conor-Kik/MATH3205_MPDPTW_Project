@@ -149,7 +149,7 @@ def Run_Time_Model(subset, inst, Time_Lim=False, Output=0, Time_Window = False, 
         return Sset
 
     model._sec_seen  = set()
-    model._prec_seen = set()
+    model._seen = set()
 
     def subtour_callback(model, where):
         if where != GRB.Callback.MIPSOL:
@@ -164,39 +164,39 @@ def Run_Time_Model(subset, inst, Time_Lim=False, Output=0, Time_Window = False, 
             return quicksum(X[i, j] for i in from_set for j in to_set if (i, j) in X)
 
         def add_cut_once(key, expr, rhs):
-            if key in model._prec_seen:
+            if key in model._seen:
                 return False
-            model._prec_seen.add(key)
+            model._seen.add(key)
             model.cbLazy(expr <= rhs)
             return True
 
         # ---- SECs on internal components ----
         cut_added = False
         Sset = build_Sset(XV)
-        for C in Sset:
-            key_sec = ("SEC", frozenset(C))
+        for S15 in Sset:
+            key_sec = ("SEC", frozenset(S15))
             if key_sec not in model._sec_seen:
-                lhs_val = sum(XV.get((i, j), 0.0) for i in C for j in C if (i, j) in X)
-                rhs = len(C) - 1
+                lhs_val = sum(XV.get((i, j), 0.0) for i in S15 for j in S15 if (i, j) in X)
+                rhs = len(S15) - 1
                 if lhs_val > rhs + EPS:
                     model._sec_seen.add(key_sec)
-                    model.cbLazy(sum_x_within(C) <= rhs)
+                    model.cbLazy(sum_x_within(S15) <= rhs)
                     cut_added = True
 
             # Set cut (all pickups of r in C but delivery not in C): on S=C∪{sink}
             triggers = False
             for r in R:
-                if set(Pr[r]).issubset(C) and (Dr_single[r] not in C):
+                if set(Pr[r]).issubset(S15) and (Dr_single[r] not in S15):
                     triggers = True
                     break
             if triggers:
-                S16 = set(C) | {sink}
+                S16 = set(S15) | {sink}
                 key_16 = ("C16", frozenset(S16))
-                if key_16 not in model._prec_seen:
+                if key_16 not in model._seen:
                     lhs_val_16 = sum(XV.get((i, j), 0.0) for i in S16 for j in S16 if (i, j) in X)
                     rhs_16 = len(S16) - 2
                     if lhs_val_16 > rhs_16 + EPS:
-                        model._prec_seen.add(key_16)
+                        model._seen.add(key_16)
                         model.cbLazy(sum_x_within(S16) <= rhs_16)
                         cut_added = True
 

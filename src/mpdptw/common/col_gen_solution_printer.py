@@ -126,10 +126,10 @@ def print_subset_solution(inst, p_subset, Capacity_Constraint = 0):
 
 
     # solve the subproblem again to “turn arcs on”
-    _m, s_cost, arcs = Run_Time_Model(p_subset, inst, False)
+    _m, s_cost, arcs = Run_Time_Model(p_subset, inst, Time_Window=True)
     if Capacity_Constraint:
         if not is_capacity_ok(arcs):
-            _m, s_cost, arcs = Run_Time_Model(p_subset, inst, False, Capacity_Constraint=True)
+            _m, s_cost, arcs = Run_Time_Model(p_subset, inst, Time_Window=True ,Capacity_Constraint=True)
 
 
     
