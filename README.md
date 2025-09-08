@@ -56,10 +56,10 @@ Each method has its own subdirectory under `src/mpdptw/methods/`.
 ### Example Commands
 
 ```bash
-python cli.py two_index MPDTW_Solver l_4_25_1.txt
-python cli.py three_index ThreeIndexSolver l_6_50_3.txt
-python cli.py arf ARF_Solver l_8_75_2.txt
-python cli.py col_gen ColGenSolver l_10_100_1.txt
+python cli.py two_index l_4_25_1.txt
+python cli.py three_index l_4_35_2.txt
+python cli.py arf n_4_50_3.txt
+python cli.py col_gen w_8_100_4.txt
 ```
 
 ---
