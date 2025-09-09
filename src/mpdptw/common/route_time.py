@@ -87,16 +87,13 @@ def Run_Time_Model(subset, inst, Time_Lim=False, Output=0, Time_Window = False, 
     if Time_Window:
         M_ij, Earliest, Latest = tight_bigM(out_arcs, t, d, V, A_sub, sink, e, l)
         S = {i: model.addVar(vtype=GRB.CONTINUOUS, lb=Earliest[i], ub=Latest[i]) for i in V} 
-
         TimeWindowFeas = {
             (i,j): model.addConstr(S[j] >= S[i] + d[i] + t[i,j] - M_ij[i,j] * (1 - X[i,j]))
             for (i,j) in A_sub
         }
         TimeFeasEarliest = {i: model.addConstr(S[i] >= Earliest[i]) for i in V}
         TimeFeasLatest   = {i: model.addConstr(S[i] <= Latest[i])   for i in V}        
-        RequestPrec = {(i, r):
-                    model.addConstr(S[Dr_single[r]] >= S[i] + d[i] + t[i, Dr_single[r]])
-                    for r in R for i in Pr[r]}
+
         
     # Degree = 1 on customer nodes 
     DegIn  = {j: model.addConstr(quicksum(X[i, j] for (i, _) in in_arcs[j]) == 1) for j in N}
@@ -272,10 +269,13 @@ def Run_Time_Model(subset, inst, Time_Lim=False, Output=0, Time_Window = False, 
         best_bound = float("inf")
 
     if best_bound > float(l[sink]):
-        return model, float(l[sink]) + 1.0, []
+        return model, float(l[sink]) + 1.0, [], None
 
     if model.Status == GRB.OPTIMAL:
         used_arcs = [(i, j) for (i, j) in X if X[i, j].X > 0.5]
-        return model, model.ObjVal, used_arcs
+        if not Time_Window:
+            return model, model.ObjVal, used_arcs, None
+        else:
+            return model, model.ObjVal, used_arcs,{i : S[i].X for i in S}
     else:
-        return model, None, []
+        return model, None, [], None

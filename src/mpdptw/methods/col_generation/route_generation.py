@@ -98,7 +98,7 @@ def Generate_Routes(instance: str, model: Model):
             print(f"[size {k}] Starting. Routes to check {routes_to_check}")
             for subset_ids, mask in gen_size_k(k):
 
-                _m, s_cost, arcs = Run_Time_Model(subset_ids, inst, False, COL_GEN_OUTPUT, Time_Window)
+                _m, s_cost, arcs, _ = Run_Time_Model(subset_ids, inst, False, COL_GEN_OUTPUT, Time_Window)
 
                 if _m.Status in (GRB.INFEASIBLE, GRB.CUTOFF):
                     add_infeasible_mask(mask)
@@ -106,7 +106,7 @@ def Generate_Routes(instance: str, model: Model):
                     continue
 
                 if VEHICLE_CAPACITY and not is_capacity_ok(arcs):
-                    _m, s_cost, arcs = Run_Time_Model(subset_ids, inst, False, COL_GEN_OUTPUT, Time_Window, VEHICLE_CAPACITY)
+                    _m, s_cost, arcs, _ = Run_Time_Model(subset_ids, inst, False, COL_GEN_OUTPUT, Time_Window, VEHICLE_CAPACITY)
                     if _m.Status in (GRB.INFEASIBLE, GRB.CUTOFF):
                         add_infeasible_mask(mask)
                         pruned += 1
@@ -127,7 +127,7 @@ def Generate_Routes(instance: str, model: Model):
         else: 
             print(f"Skipping - All subsets pruned")
             break
-       
+
     print(f"\nAll columns generated. Valid Routes: {processed}. "
           f"\nUnique Pruned: {pruned}, Total Pruned: {(pow(2, n) - 1) - processed}")
     print("**********************************************")
@@ -136,11 +136,10 @@ def Generate_Routes(instance: str, model: Model):
     for s in costs.keys():
         for elem in s:
             result[elem].append(s)
-
+    
     Z = {p : model.addVar(vtype=GRB.BINARY) for p in costs}
 
     model.setObjective(quicksum(Z[p] *costs[p] for p in costs.keys()), GRB.MINIMIZE)
-
     for r in R:
         model.addConstr(quicksum(Z[ss] for ss in result[r]) == 1)
 
@@ -155,8 +154,9 @@ def Generate_Routes(instance: str, model: Model):
                 print("\nRequests:", list(p),"Cost:", round(costs[p], 2))
     print("**********************************************")
     print(f"Total runtime {end_time-start_time:.2f}")
-    print("Obj Value",round(model.ObjVal,3))
+    print(f"Obj Value: {model.ObjVal:.2f}")
     print("**********************************************")
+
 def main(argv=None):
     path, _ = parse_instance_argv(argv, default_filename="l_4_25_4.txt")
     model = Model("MPDTW")

@@ -1,5 +1,8 @@
 # --- minimal safe getters / route extraction ---
 from mpdptw.common.route_time import Run_Time_Model
+from mpdptw.common.big_M import tight_bigM
+
+
 def _as_delivery_node(d):
     if isinstance(d, (list, tuple, set)):
         return next(iter(d))
@@ -106,7 +109,15 @@ def print_subset_solution(inst, p_subset, Capacity_Constraint = 0):
     Q     = inst["Q"]
     EPS   = 1e-6
     sink  = inst.get("sink")
+    V = inst["V_ext"]  
+    A = inst["A_feasible_ext"]
+    in_arcs  = {v: [] for v in V}
+    out_arcs = {v: [] for v in V}
+    for (i, j) in A:
+        out_arcs[i].append((i, j))
+        in_arcs[j].append((i, j))
 
+    _, Earliest, _ = tight_bigM(out_arcs, t, d, V, A, sink, e, l)
     def is_capacity_ok(arcs):
 
         succ = {i: j for (i, j) in arcs}
@@ -126,10 +137,10 @@ def print_subset_solution(inst, p_subset, Capacity_Constraint = 0):
 
 
     # solve the subproblem again to “turn arcs on”
-    _m, s_cost, arcs = Run_Time_Model(p_subset, inst, Time_Window=True)
+    _m, s_cost, arcs, S = Run_Time_Model(p_subset, inst, Time_Window=True)
     if Capacity_Constraint:
         if not is_capacity_ok(arcs):
-            _m, s_cost, arcs = Run_Time_Model(p_subset, inst, Time_Window=True ,Capacity_Constraint=True)
+            _m, s_cost, arcs, S = Run_Time_Model(p_subset, inst, Time_Window=True ,Capacity_Constraint=True)
 
 
     
@@ -141,16 +152,6 @@ def print_subset_solution(inst, p_subset, Capacity_Constraint = 0):
     node_info = _build_node_index(R, Pr, Dr, sink=sink)
 
     # manual S: S[0]=0; then S[v] = S[u] + d[u] + t[u,v]
-    S = {}
-    S[0] = 0.0
-    for route in routes:
-        for idx, v in enumerate(route):
-            if idx == 0:
-                continue  # depot already set
-            u = route[idx - 1]
-            tij = float(t.get((u, v), 0.0))
-            du  = float(d.get(u, 0.0))
-            S[v] = S.get(u, 0.0) + du + tij
 
     # --- compute travel-only objective + service/wait and horizon ---
     # travel-only obj = sum t[i,j] over arcs that are "on"

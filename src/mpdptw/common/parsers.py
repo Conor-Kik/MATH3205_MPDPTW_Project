@@ -172,7 +172,7 @@ def build_milp_data(filename, cost_equals_time=True, speed=1.0):
     R = inst["R"]
     W = []
     for r1, r2 in itertools.combinations(R, 2):
-        _m, _, _ = Run_Time_Model([r1,r2], inst, Time_Window=True)
+        _m, _, _, _ = Run_Time_Model([r1,r2], inst, Time_Window=True)
         feasible = _m.Status == GRB.OPTIMAL
         if not feasible:
             W.append((r1, r2))
