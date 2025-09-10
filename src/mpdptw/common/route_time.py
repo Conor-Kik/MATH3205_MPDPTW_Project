@@ -3,16 +3,28 @@ from mpdptw.common.big_M import tight_bigM
 
 
 
-def Run_Time_Model(subset, inst, Time_Lim=False, Output=0, Time_Window = False, Capacity_Constraint = False):
-    model = Model("Route_Time")
-    
+def Run_Time_Model(subset, inst, Time_Lim=False, 
+                   Output=0, Time_Window = False, 
+                   Capacity_Constraint = False,
+                   Threads = None,
+                    ENV=None):
+    if not ENV:
+        model = Model("Route_Time")
+    else:
+        model =  Model("Route_Time", env=ENV)
+
+
     if Output == 0:
-        model.setParam("OutputFlag", 0)
+        model.setParam("OutputFlag", 0)    
     else:
         print("********************")
         print(subset)
         print("********************")
         model.setParam("OutputFlag", 1)
+
+    
+    if Threads is not None:
+        model.setParam("Threads", Threads)
     if Time_Lim:
         model.setParam("TimeLimit", len(subset) * 3)
 
@@ -106,10 +118,7 @@ def Run_Time_Model(subset, inst, Time_Lim=False, Output=0, Time_Window = False, 
     model.addConstr(quicksum(X[j, sink]  for (j, _) in in_arcs[sink])  == 1)
 
 
-    model.Params.LazyConstraints = 1
 
-
-    model.Params.Cutoff = float(l[sink])
 
     EPS = 1e-9
     N_only = set(N)
@@ -261,6 +270,10 @@ def Run_Time_Model(subset, inst, Time_Lim=False, Output=0, Time_Window = False, 
                     add_cut_once(key, expr, len(S_nodes))
                     cut_added = True
 
+    model.Params.LazyConstraints = 1
+    model.Params.Cutoff = float(l[sink])
+    if not Time_Window and not Capacity_Constraint:
+        model.Params.Heuristics = 0
     model.optimize(subtour_callback)
 
     try:

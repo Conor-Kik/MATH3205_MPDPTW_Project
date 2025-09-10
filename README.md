@@ -32,11 +32,12 @@ The entry point is `cli.py` at the project root.
 ### General usage
 
 ```bash
-python cli.py <method> <instance_filename>
+python cli.py <method> <instance_filename> [solver-args...]
 ```
 
-- `<method>` → the method name (e.g., `two_index`)
-- `<instance_filename>` → the instance file located inside `mpdtw_instances_2019/`
+- `<method>` → the method name (e.g., `two_index`)  
+- `<instance_filename>` → the instance file located inside `mpdtw_instances_2019/`  
+- `[solver-args...]` → optional additional arguments for the solver  
 
 ---
 
@@ -46,8 +47,9 @@ Currently implemented methods include:
 
 - `two_index` → Two-index formulation solver  
 - `three_index` → Three-index formulation solver  
-- `arf` → Asymmetric representatives formulation 
+- `arf` → Asymmetric representatives formulation  
 - `col_gen` → Column Generation approach  
+  - Add `--mt` after the instance filename to use the **multi-threaded column generation** implementation.  
 
 Each method has its own subdirectory under `src/mpdptw/methods/`.
 
@@ -60,6 +62,7 @@ python cli.py two_index l_4_25_1.txt
 python cli.py three_index l_4_35_2.txt
 python cli.py arf n_4_50_3.txt
 python cli.py col_gen w_8_100_4.txt
+python cli.py col_gen w_8_100_4.txt --mt   # Multi-threaded column generation
 ```
 
 ---

@@ -47,7 +47,7 @@ def Generate_Routes(instance: str, model: Model):
                 return False
         return True
 
-    pos_to_id = {pos: pos for pos in R}   
+
     n = len(R)
 
     infeasible_masks = set()
@@ -73,7 +73,7 @@ def Generate_Routes(instance: str, model: Model):
                 # final candidate; drop it if it contains a known-bad subset
                 if contains_infeasible_subset(mask):
                     return
-                yield tuple(pos_to_id[p] for p in curr), mask
+                yield tuple(curr), mask
                 return
 
             for p in range(start_idx, n):
@@ -89,7 +89,10 @@ def Generate_Routes(instance: str, model: Model):
     costs = {}
     pruned = processed = 0
     W_max = n  
-
+    service_time_r = {
+                r: sum(d.get(v, 0.0) for v in Pr[r]) + d.get(Dr_single[r], 0.0)
+                for r in R
+}
     for k in range(1, W_max + 1):
         
         routes_to_check = sum(1 for _ in gen_size_k(k))
@@ -117,13 +120,12 @@ def Generate_Routes(instance: str, model: Model):
                 for r in subset_ids:
                     nodes_set.update(Pr[r])
                     nodes_set.add(Dr_single[r])
-                service_time = sum(d.get(node_id, 0.0) for node_id in nodes_set)
-
+                service_time = sum(service_time_r[r] for r in subset_ids)
                 costs[subset_ids] = s_cost - service_time
                 processed += 1
 
             print(f"[size {k}]"
-                f" Totals — Pruned: {pruned}, Valid Routes Found: {processed}\n")
+                f" Total Pruned: {pruned}, Total Valid Routes Found: {processed}\n")
         else: 
             print(f"Skipping - All subsets pruned")
             break
