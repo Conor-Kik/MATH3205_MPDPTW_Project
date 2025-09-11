@@ -1,3 +1,4 @@
+from fileinput import filename
 from math import comb
 from gurobipy import *
 from mpdptw.common.cli import parse_instance_argv
@@ -46,14 +47,17 @@ def run_k_in_parallel(subsets_k, inst, Time_Window, workers, pricing_threads):
     return results
 
 def generate_routes(instance: str, model: Model):
-    print("USING MULTI-THREADING FOR ROUTE GENERATION")
-    print("Workers to use:", psutil.cpu_count(logical=False))
-    inst = build_milp_data(str(instance))
-    start_time = time.perf_counter()
+
+    
+    
     path = Path(instance)
     filename = path.name
     Time_Window = not filename.startswith("w")
 
+    print("USING MULTI-THREADING FOR ROUTE GENERATION")
+    print("Workers to use:", psutil.cpu_count(logical=False))
+    inst = build_milp_data(str(instance))
+    start_time = time.perf_counter()
     R        = inst["R"]
     Pr       = inst["Pr"]
     Dr_single= inst["Dr_single"]
@@ -97,7 +101,8 @@ def generate_routes(instance: str, model: Model):
     processed_total = 0  # if you want cumulative stats
     total_pruned = 0
     for k in range(1, W_max + 1):
-        subsets_k = frontier                      # already filtered by masks
+        subsets_k = frontier                # already filtered by masks
+        valid_subsets = []
         if not subsets_k:
             max_n = k
             print("Skipping - All subsets pruned")
@@ -108,7 +113,7 @@ def generate_routes(instance: str, model: Model):
         total_pruned += pruned
         pruned = 0
         
-        if len(subsets_k) > 150:
+        if  len(subsets_k) > 100:
             # --- parallel path ---
             batch = run_k_in_parallel(
                 subsets_k, inst, Time_Window,
@@ -119,6 +124,7 @@ def generate_routes(instance: str, model: Model):
                     add_infeasible_mask(mask)
                     pruned += 1
                     continue
+                valid_subsets.append((subset_ids, mask))
                 costs[tuple(subset_ids)] = s_cost - sum(service_time_r[r] for r in subset_ids)
                 processed += 1
         else:
@@ -129,16 +135,16 @@ def generate_routes(instance: str, model: Model):
                     add_infeasible_mask(mask)
                     pruned += 1
                     continue
+                valid_subsets.append((subset_ids, mask))
                 costs[tuple(subset_ids)] = s_cost - sum(service_time_r[r] for r in subset_ids)
                 processed += 1
-
         print(f"[size {k}] Infeasible Found: {pruned}, Valid Routes Found: {processed- start_process}\n")
         processed_total += processed
 
         # ------- build frontier for k+1 by extending each k-subset --------
         # Extend lexicographically to avoid duplicates: only add indices > last
         next_frontier = []
-        for ids, mask in subsets_k:
+        for ids, mask in valid_subsets:
             start = ids[-1] + 1
             for p in range(start, n):
                 new_mask = mask | (1 << p)

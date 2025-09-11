@@ -88,6 +88,7 @@ def Generate_Routes(instance: str, model: Model):
         yield from bt(0, 0)
     costs = {}
     pruned = processed = 0
+    total_pruned = 0
     W_max = n  
     service_time_r = {
                 r: sum(d.get(v, 0.0) for v in Pr[r]) + d.get(Dr_single[r], 0.0)
@@ -96,7 +97,8 @@ def Generate_Routes(instance: str, model: Model):
     for k in range(1, W_max + 1):
         
         routes_to_check = sum(1 for _ in gen_size_k(k))
-        
+        pruned = 0
+        total_pruned += pruned
         if routes_to_check:
             print(f"[size {k}] Starting. Routes to check {routes_to_check}")
             for subset_ids, mask in gen_size_k(k):
