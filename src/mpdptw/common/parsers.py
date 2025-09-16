@@ -162,7 +162,7 @@ def _compute_minimal_S_sets(Pr, Dr_single, sink, start=0):
     return S_list
 
 # ── MILP builder: create (V,P,D,N,A,R,Pr,Dr) and (K,Q,e,l,d,q,t,c) ───────────
-def build_milp_data(filename, cost_equals_time=True, speed=1.0):
+def build_milp_data(filename, cost_equals_time=True, speed=1.0, generate_W_set=True):
     """
     Returns a dictionary .
     """
@@ -170,20 +170,19 @@ def build_milp_data(filename, cost_equals_time=True, speed=1.0):
     r = inst["Nodes_To_Reqs"]
     A_feas = inst["A_feasible_ext"]
     R = inst["R"]
-    W = []
-    for r1, r2 in itertools.combinations(R, 2):
-        _m, _, _, _ = Run_Time_Model([r1,r2], inst, Time_Window=True)
-        feasible = _m.Status == GRB.OPTIMAL
-        if not feasible:
-            W.append((r1, r2))
-
-
-    inst["W"] = W
-    inst["A_feasible_ext"] = [
-        (i, j) for (i, j) in A_feas
-        if (r[i], r[j]) not in W and (r[j], r[i]) not in W
-    ]
-        
+    if generate_W_set:
+        W = []
+        for r1, r2 in itertools.combinations(R, 2):
+            _m, _, _, _, _ = Run_Time_Model([r1,r2], inst, Time_Window=True)
+            feasible = _m.Status == GRB.OPTIMAL
+            if not feasible:
+                W.append((r1, r2))
+        inst["W"] = W
+        inst["A_feasible_ext"] = [
+            (i, j) for (i, j) in A_feas
+            if (r[i], r[j]) not in W and (r[j], r[i]) not in W
+        ]
+            
     print(f"-----------\nARCS CUTS: {len(inst["A"]) - len(inst["A_feasible_ext"])}\n-----------")
     return inst
 

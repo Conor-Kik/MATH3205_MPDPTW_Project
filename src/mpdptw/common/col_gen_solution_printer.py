@@ -137,14 +137,11 @@ def print_subset_solution(inst, p_subset, Capacity_Constraint = 0):
 
 
     # solve the subproblem again to “turn arcs on”
-    _m, s_cost, arcs, S = Run_Time_Model(p_subset, inst, Time_Window=True)
+    _m, s_cost, arcs, S, _ = Run_Time_Model(p_subset, inst, Time_Window=True)
     if Capacity_Constraint:
         if not is_capacity_ok(arcs):
-            _m, s_cost, arcs, S = Run_Time_Model(p_subset, inst, Time_Window=True ,Capacity_Constraint=True)
+            _m, s_cost, arcs, S, _ = Run_Time_Model(p_subset, inst, Time_Window=True ,Capacity_Constraint=True)
 
-
-    
-    
     X = _coerce_X(arcs)
 
     # reconstruct routes
