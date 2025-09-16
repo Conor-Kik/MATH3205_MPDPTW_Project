@@ -77,3 +77,8 @@ python cli.py col_gen w_8_100_4.txt --mt   # Multi-threaded column generation
 
 - Always run from the **project root** so paths resolve correctly.  
 - The project uses **Gurobi** as the solver, so ensure it is properly installed and licensed.  
+
+## References
+
+- This project builds on the work of [Aziez, Côté, and Coelho (2020)](https://www.sciencedirect.com/science/article/pii/S0377221720300771), *Exact algorithms for the multi-pickup and delivery problem with time windows*, *European Journal of Operational Research, 284(3)*, pp. 906–919. The Two- and Three-index models, as well as the ARF model, follow the formulations presented in this paper.  
+- The column generation approach has been developed independently as part of this project.

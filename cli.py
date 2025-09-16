@@ -11,7 +11,7 @@ REGISTRY: Dict[str, str] = {
     "three_index": "mpdptw.methods.three_index.MPDTW_Solver:main",
     "arf": "mpdptw.methods.arf.MPDTW_Solver_Arf:main",
     "col_gen": "mpdptw.methods.col_generation.route_generation:main",
-    "col_gen_mt": "mpdptw.methods.col_generation.multi_thread_route_generation:main",
+    "mt": "mpdptw.methods.col_generation.multi_thread_route_generation:main",
 }
 
 def load_entry(entry: str):
@@ -29,27 +29,21 @@ def main():
     if len(sys.argv) < 3 or sys.argv[1] in {"-h", "--help"}:
         print("Usage: python cli.py <method> <instance_filename> [solver-args...]")
         print("\nAvailable methods:")
-        for m in ["two_index", "three_index", "arf", "col_gen"]:
+        for m in REGISTRY.keys():
             print(f"  {m}")
-        print("\nUse --mt with col_gen for multi-threaded version.")
         sys.exit(0)
 
     method = sys.argv[1]
     if method not in REGISTRY:
-        print(f"Unknown method '{method}'. Known: two_index, three_index, arf, col_gen")
+        print(f"Unknown method '{method}'. Known: {', '.join(REGISTRY.keys())}")
         sys.exit(2)
 
     # Everything after <method> is passed to the solver
     solver_argv = sys.argv[2:]
-
-    # Special handling: col_gen with --mt flag
-    if method == "col_gen" and "--mt" in solver_argv:
-        solver_argv = [arg for arg in solver_argv if arg != "--mt"]  # remove flag
-        entry = REGISTRY["col_gen_mt"]
-    else:
-        entry = REGISTRY[method]
-
+    entry = REGISTRY[method]
     func = load_entry(entry)
+
+    # Call the solver's main, forwarding its argv
     func(solver_argv)
 
 if __name__ == "__main__":
