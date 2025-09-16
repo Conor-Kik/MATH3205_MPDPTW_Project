@@ -336,7 +336,6 @@ def Run_Time_Model(
                 expr = sum_x({depot}, S) + sum_x_within(S | {dr})
                 cut_added |= add_cut_once(key, expr, len(S))
 
-    # Enable lazy constraints and suppress default heuristics if no time windows
     model.Params.LazyConstraints = 1
     if not Time_Window:
         model.Params.Heuristics = 0

@@ -2,7 +2,7 @@ from gurobipy import *
 from mpdptw.common.cli import parse_instance_argv
 from mpdptw.common.parsers import build_milp_data
 from mpdptw.common.route_time_lifted import Run_Time_Model
-from mpdptw.common.col_gen_solution_printer import print_subset_solution
+from mpdptw.common.printers.col_gen_solution_printer import print_subset_solution
 import time
 from pathlib import Path
 

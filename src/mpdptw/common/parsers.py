@@ -5,7 +5,6 @@ import itertools
 from pathlib import Path
 
 from gurobipy import GRB
-from src.mpdptw.common.W_set_Model import Infeasible_Req_Pairs
 from mpdptw.common.route_time import Run_Time_Model
 
 OUTPUT_W_SET_MODEL = 0
