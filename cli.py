@@ -1,4 +1,3 @@
-# cli.py (project root)
 import os, sys, importlib
 from typing import Dict
 
@@ -11,7 +10,7 @@ REGISTRY: Dict[str, str] = {
     "three_index": "mpdptw.methods.three_index.MPDTW_Solver:main",
     "arf": "mpdptw.methods.arf.MPDTW_Solver_Arf:main",
     "col_gen": "mpdptw.methods.col_generation.route_generation:main",
-    "mt": "mpdptw.methods.col_generation.multi_thread_route_generation:main",
+    "col_gen_mt": "mpdptw.methods.col_generation.multi_thread_route_generation:main",
 }
 
 def load_entry(entry: str):
@@ -40,6 +39,12 @@ def main():
 
     # Everything after <method> is passed to the solver
     solver_argv = sys.argv[2:]
+
+    # Special handling: if method is col_gen and --mt is present, switch to multithreaded
+    if method == "col_gen" and "--mt" in solver_argv:
+        solver_argv.remove("--mt")  # don't forward flag to solver
+        method = "col_gen_mt"
+
     entry = REGISTRY[method]
     func = load_entry(entry)
 
