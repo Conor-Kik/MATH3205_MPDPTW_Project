@@ -1,5 +1,5 @@
 from mpdptw.common.cli import parse_instance_argv
-from mpdptw.common.three_index_printer import print_solution_summary
+from mpdptw.common.printers.three_index_printer import print_solution_summary
 from mpdptw.common.parsers import build_milp_data
 from gurobipy import *
 

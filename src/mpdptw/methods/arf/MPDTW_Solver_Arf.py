@@ -1,5 +1,5 @@
 from mpdptw.common.cli import parse_instance_argv
-from mpdptw.common.arf_solution_printer import print_solution_summary
+from mpdptw.common.printers.arf_solution_printer import print_solution_summary
 from mpdptw.common.parsers import build_milp_data
 from gurobipy import *
 from mpdptw.methods.arf.cluster_assignment import Run_Cluster_Assignment_Model
@@ -9,7 +9,6 @@ from mpdptw.common.big_M import tight_bigM
 
 OUTPUT_REQ_MODEL = 0 # 1 Shows for request pair infeasibility model output
 OUTPUT_CLUSTER_MODEL = 1 # 1 Shows full cluster_model output
-PREPROCESSING_CUTOFF = 10 #Amount of time that cluster assignment model termininates (seconds)
 
 def Run_Model(path, model: Model):
     start = time.perf_counter()
@@ -21,7 +20,7 @@ def Run_Model(path, model: Model):
     V = inst["V_ext"]               # all nodes including origin (0) and sink
     A = inst["A_feasible_ext"]      # feasible arcs 
     N = inst["N"]
-
+    PREPROCESSING_CUTOFF = len(N)//5
     R = inst["R"]                   # request ids (0-based range)
     Pr = inst["Pr"]                 # pickups per request
     Dr = inst["Dr"]                 # deliveries per request
@@ -85,6 +84,8 @@ def Run_Model(path, model: Model):
          for r in R for k in R if rank[r] >= k}
 
     S = {i: model.addVar(vtype=GRB.CONTINUOUS, lb=Earliest[i], ub=Latest[i]) for i in V}
+    
+    
     # =========================
     # Objective
     # =========================
@@ -193,6 +194,7 @@ def Run_Model(path, model: Model):
     
     end = time.perf_counter()
     # Optimize & print
+
     model.optimize()
     
     if True:

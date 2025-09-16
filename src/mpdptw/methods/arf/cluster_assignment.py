@@ -65,12 +65,11 @@ def Run_Cluster_Assignment_Model(inst, model: Model, W, time_limit, outputflag):
     else: 
         model.setParam("OutputFlag", 0)
     model.setParam("MIPFocus", 1)
-    model.setParam("TimeLimit", time_limit) 
-    EPS = 1e-6
+    model.setParam("TimeLimit", time_limit ) 
     # Sets (extended with sink depot)
     V = inst["V_ext"]  # all nodes including origin (0) and sink
     A = inst["A_feasible_ext"]  # feasible arcs 
-    N = inst["N"]
+    
 
     R = inst["R"]  # request ids
     K = R
