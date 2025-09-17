@@ -103,7 +103,7 @@ def generate_routes(instance: str, model: Model):
 
     # ------------------- Subset Streaming with Early Pruning (sequential) ------------------ #
 
-    costs = {}       # subset -> reduced cost (objective contribution)
+    costs = {}       # subset -> cost (objective contribution)
     cap_fails = 0
     curr_time = time.perf_counter()
     pruned = processed = optimal_pruning = 0
@@ -171,7 +171,7 @@ def generate_routes(instance: str, model: Model):
                     continue
                 runtime += runtime2  # accumulate runtime for reporting
 
-            # Keep for frontier extension and reduced cost computation
+            # Keep for frontier extension and cost computation
             valid_subsets.append((subset_ids, mask, runtime))
             costs_time[tuple(subset_ids)] = s_cost
             costs[tuple(subset_ids)] = s_cost - sum(service_time_r[r] for r in subset_ids)
@@ -232,7 +232,7 @@ def generate_routes(instance: str, model: Model):
     # Binary selection variables per generated subset
     Z = {p: model.addVar(vtype=GRB.BINARY) for p in costs}
 
-    # Objective: minimize total reduced cost
+    # Objective: minimize total cost
     model.setObjective(
         quicksum(Z[p] * costs[p] for p in costs.keys()), GRB.MINIMIZE
     )
