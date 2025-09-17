@@ -1,5 +1,5 @@
 # --- minimal safe getters / route extraction ---
-from mpdptw.common.route_time import Run_Time_Model
+from mpdptw.common.route_time_lifted import Run_Time_Model
 from mpdptw.common.big_M import tight_bigM
 
 

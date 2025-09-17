@@ -5,7 +5,7 @@ import itertools
 from pathlib import Path
 
 from gurobipy import GRB
-from mpdptw.common.route_time import Run_Time_Model
+from mpdptw.common.route_time_lifted import Run_Time_Model
 
 OUTPUT_W_SET_MODEL = 0
 # ── Line parsers ───────────────────────────────────────────────────────────────
