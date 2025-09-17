@@ -197,13 +197,11 @@ def generate_routes(instance: str, model: Model):
                 #Superset pruning - Lemma 1
                 if contains_infeasible_subset(new_mask):
                     continue
-
                 #Lemma 2 - Quick feasibility bound: s_cost + service_time_r[p] <= l[depot] 
                 if costs_time[tuple(ids)] + service_time_r[p] > l[depot]:
                     optimal_pruning += 1
                     total_pruned += 1
                     continue
-
                 next_frontier.append((ids + (p,), new_mask))
 
         frontier = next_frontier

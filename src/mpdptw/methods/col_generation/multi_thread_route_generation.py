@@ -262,7 +262,7 @@ def generate_routes(instance: str, model: Model):
         infeasible_masks.add(mask)
 
     # ------------------- Subset Streaming with Early Pruning ------------------ #
-    costs = {}       # subset -> reduced cost (objective contribution)
+    costs = {}       # subset -> cost (objective contribution)
     cap_fails = 0
     curr_time = time.perf_counter()
     pruned = processed = optimal_pruning = 0
@@ -325,7 +325,7 @@ def generate_routes(instance: str, model: Model):
 
                 valid_subsets.append((subset_ids, mask, runtime))
                 costs_time[tuple(subset_ids)] = s_cost
-                # Reduced cost: subtract service time contribution
+                # Pure travel cost: subtract service time contribution
                 costs[tuple(subset_ids)] = s_cost - sum(
                     service_time_r[r] for r in subset_ids
                 )
@@ -413,7 +413,7 @@ def generate_routes(instance: str, model: Model):
     # Master selection variables over generated subsets
     Z = {p: model.addVar(vtype=GRB.BINARY) for p in costs}
 
-    # Minimize total reduced cost
+    # Minimize total cost
     model.setObjective(quicksum(Z[p] * costs[p] for p in costs.keys()), GRB.MINIMIZE)
 
     # Each request must be covered exactly once
