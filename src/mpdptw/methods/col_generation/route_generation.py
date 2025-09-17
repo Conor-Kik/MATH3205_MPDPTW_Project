@@ -5,7 +5,7 @@ from mpdptw.common.route_time_lifted import Run_Time_Model
 from mpdptw.common.printers.col_gen_solution_printer import print_subset_solution
 import time
 from pathlib import Path
-
+from math import comb
 
 # ---------------------------- Configuration Flags ---------------------------- #
 VEHICLE_CAPACITY = 0  # set to 1 to add vehicle capacity constraints (re-run check)
@@ -49,6 +49,7 @@ def generate_routes(instance: str, model: Model):
     q = inst["q"]
     depot = inst["depot"]
     sink = inst["sink"]
+    l    = inst["l"]
 
     # ------------------------ Lightweight capacity check --------------------- #
     def is_capacity_ok(arcs):
@@ -99,102 +100,127 @@ def generate_routes(instance: str, model: Model):
             infeasible_masks.remove(bad)
         infeasible_masks.add(mask)
 
-    # -------------------- Subset generator of fixed size k -------------------- #
-    def gen_size_k(k):
-        """
-        Yield (subset_ids_tuple, bitmask) for all k-sized subsets, skipping
-        those that contain a known infeasible submask.
-        """
-        curr = []  # positions [0..n-1]
 
-        def bt(start_idx, mask):
-            if len(curr) == k:
-                # final candidate; drop if it contains a known-bad subset
-                if contains_infeasible_subset(mask):
-                    return
-                yield tuple(curr), mask
-                return
+    # ------------------- Subset Streaming with Early Pruning (sequential) ------------------ #
 
-            for p in range(start_idx, n):
-                new_mask = mask | (1 << p)
-                # early prune by infeasible-subset masks only
-                if contains_infeasible_subset(new_mask):
-                    continue
-                curr.append(p)
-                yield from bt(p + 1, new_mask)
-                curr.pop()
+    costs = {}       # subset -> reduced cost (objective contribution)
+    cap_fails = 0
+    curr_time = time.perf_counter()
+    pruned = processed = optimal_pruning = 0
+    W_max = n  # upper bound on subset size
 
-        yield from bt(0, 0)
-
-    # -------------------- Pricing / Column Generation Loop -------------------- #
-    costs = {}           # subset_ids(tuple) -> reduced cost
-    pruned = processed = 0
-    total_pruned = 0
-    W_max = n
-
-    # Precompute service time per request (sum of node service times)
+    # Precompute service time of each request's required nodes
     service_time_r = {
         r: sum(d.get(v, 0.0) for v in Pr[r]) + d.get(Dr_single[r], 0.0) for r in R
     }
 
+    # Initialize frontier with singletons (as tuples) that aren't immediately pruned
+    frontier = []
+    for p in range(n):
+        m = 1 << p
+        if not contains_infeasible_subset(m):
+            frontier.append(((p,), m))  # (ids_tuple, mask)
+
+    max_n = 0
+    total_pruned = 0
+
     for k in range(1, W_max + 1):
-        routes_to_check = sum(1 for _ in gen_size_k(k))  # count upfront
-        pruned = 0
-        total_pruned += pruned
+        costs_time = {}        # raw s_cost per subset (for pruning bound)
+        subsets_k = frontier   # already filtered by masks
+        valid_subsets = []
 
-        if routes_to_check:
-            print(f"[size {k}] Starting. Routes to check {routes_to_check}")
-
-            for subset_ids, mask in gen_size_k(k):
-                # Solve pricing subproblem for this subset (keep call signature)
-                _m, s_cost, arcs, _, _ = Run_Time_Model(
-                    subset_ids, inst, False, COL_GEN_OUTPUT, Time_Window
-                )
-
-                # If infeasible, record mask for pruning and skip
-                if _m.Status in (GRB.INFEASIBLE, GRB.CUTOFF):
-                    add_infeasible_mask(mask)
-                    pruned += 1
-                    continue
-
-                # Optional capacity re-check; if violated, re-run with capacity
-                if VEHICLE_CAPACITY and not is_capacity_ok(arcs):
-                    _m, s_cost, arcs, _, _ = Run_Time_Model(
-                        subset_ids,
-                        inst,
-                        False,
-                        COL_GEN_OUTPUT,
-                        Time_Window,
-                        VEHICLE_CAPACITY,
-                    )
-                    if _m.Status in (GRB.INFEASIBLE, GRB.CUTOFF):
-                        add_infeasible_mask(mask)
-                        pruned += 1
-                        continue
-
-                # Compute reduced cost: subtract service-time contribution
-                # (A already handles arc infeasibilities)
-                nodes_set = set()
-                for r in subset_ids:
-                    nodes_set.update(Pr[r])
-                    nodes_set.add(Dr_single[r])
-                service_time = sum(service_time_r[r] for r in subset_ids)
-                costs[subset_ids] = s_cost - service_time
-                processed += 1
-
-            print(
-                f"[size {k}]"
-                f" Total Pruned: {pruned}, Total Valid Routes Found: {processed}\n"
-            )
-        else:
+        if not subsets_k:
+            max_n = k
             print("Skipping - All subsets pruned")
             break
 
+        print(
+            f"[size {k}] Starting.\n"
+            f"Routes to check {len(subsets_k)}"
+            f"{f' - Infeasible Routes pre-pruned: {optimal_pruning}' if optimal_pruning else ''}"
+        )
+
+        start_process = processed
+        total_pruned += pruned
+        pruned = 0
+
+        # ------------------------- Sequential processing path ------------------------- #
+        for subset_ids, mask in subsets_k:
+            # First pass (no explicit capacity constraint)
+            _m, s_cost, arcs, _, runtime = Run_Time_Model(
+                subset_ids, inst, Time_Window=Time_Window
+            )
+            if _m.Status in (GRB.INFEASIBLE, GRB.CUTOFF):
+                add_infeasible_mask(mask)
+                pruned += 1
+                continue
+
+            # Optional capacity re-check; if violated, re-run with capacity constraint
+            if VEHICLE_CAPACITY and not is_capacity_ok(arcs):
+                _m, s_cost, arcs, _, runtime2 = Run_Time_Model(
+                    subset_ids,
+                    inst,
+                    Output=COL_GEN_OUTPUT,
+                    Time_Window=Time_Window,
+                    Capacity_Constraint=True,
+                )
+                if _m.Status in (GRB.INFEASIBLE, GRB.CUTOFF):
+                    cap_fails += 1
+                    add_infeasible_mask(mask)
+                    pruned += 1
+                    continue
+                runtime += runtime2  # accumulate runtime for reporting
+
+            # Keep for frontier extension and reduced cost computation
+            valid_subsets.append((subset_ids, mask, runtime))
+            costs_time[tuple(subset_ids)] = s_cost
+            costs[tuple(subset_ids)] = s_cost - sum(service_time_r[r] for r in subset_ids)
+            processed += 1
+
+        print(
+            f"Time: {time.perf_counter()-curr_time:.2f}, "
+            f"Infeasible Found: {pruned}, "
+            f"Valid Routes Found: {processed - start_process}\n"
+        )
+        curr_time = time.perf_counter()
+
+        # ----------------- Build frontier for k+1 by extending k ---------------- #
+        # Lexicographic extension to avoid duplicates: only add indices > last
+        optimal_pruning = 0
+        next_frontier = []
+
+
+        for ids, mask, _ in valid_subsets:
+            start = ids[-1] + 1
+            for p in range(start, n):
+                new_mask = mask | (1 << p)
+                #Superset pruning - Lemma 1
+                if contains_infeasible_subset(new_mask):
+                    continue
+
+                #Lemma 2 - Quick feasibility bound: s_cost + service_time_r[p] <= l[depot] 
+                if costs_time[tuple(ids)] + service_time_r[p] > l[depot]:
+                    optimal_pruning += 1
+                    total_pruned += 1
+                    continue
+
+                next_frontier.append((ids + (p,), new_mask))
+
+        frontier = next_frontier
+
+    if max_n == 0:
+        max_n = W_max + 1
+
     print(
         f"\nAll columns generated. Valid Routes: {processed}. "
-        f"\nUnique Pruned: {pruned}, Total Pruned: {(pow(2, n) - 1) - processed}"
+        f"\nInfeasible Found: {total_pruned}, "
+        f"Subsets (≤ length {max_n - 1}) pruned from infeasible: "
+        f"{sum(comb(n, k) for k in range(1, max_n)) - processed - total_pruned}"
     )
+    if VEHICLE_CAPACITY:
+        print(f"Capacity re-checks that failed: {cap_fails}")
     print("**********************************************")
+
 
     # ------------------------- Master Problem Assembly ------------------------ #
     # Map each request to all generated subsets that include it
