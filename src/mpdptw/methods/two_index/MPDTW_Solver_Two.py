@@ -47,7 +47,7 @@ def Run_Model(path, model: Model):
     depot = inst["depot"]  # start depot (0)
     sink = inst["sink"]  # sink depot
     #M_ij = {(i,j): max(0.0, l[i] + d[i] + t[i,j] - e[j]) for (i,j) in A}
-    M_ij, Earliest, Latest = tight_bigM(out_arcs, t, d, V, A, sink, e, l)
+    M_ij, Earliest, Latest = tight_bigM(out_arcs, t, d, V, A, sink, e, l, Pr=Pr, Dr_single=Dr_single)
     Pickups = [i for r in R for i in Pr[r]]
     Dels = [Dr_single[r] for r in R]
     N_only = set(N)

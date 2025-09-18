@@ -117,7 +117,6 @@ def print_subset_solution(inst, p_subset, Capacity_Constraint = 0):
         out_arcs[i].append((i, j))
         in_arcs[j].append((i, j))
 
-    _, Earliest, _ = tight_bigM(out_arcs, t, d, V, A, sink, e, l)
     def is_capacity_ok(arcs):
 
         succ = {i: j for (i, j) in arcs}

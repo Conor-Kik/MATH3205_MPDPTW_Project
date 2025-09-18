@@ -57,7 +57,7 @@ def Run_Model(path, model: Model):
 
     # Big-M per arc (tight)
     #M_ij = {(i,j): max(0.0, l[i] + d[i] + t[i,j] - e[j]) for (i,j) in A}
-    M_ij, Earliest, Latest = tight_bigM(out_arcs, t, d, V, A, sink, e, l)
+    M_ij, Earliest, Latest = tight_bigM(out_arcs, t, d, V, A, sink, e, l, Pr=Pr, Dr_single=Dr_single)
     # Infeasible request pairs, then ordering MIP (returns rank and pos)
     #W = Infeasible_Req_Pairs(R, e, l, Pr, Dr_single, c, q, sink, d, Q, inst, output_flag=OUTPUT_REQ_MODEL)
     W = inst["W"]
