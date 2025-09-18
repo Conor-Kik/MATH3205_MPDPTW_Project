@@ -3,7 +3,7 @@ from heapq import heappush, heappop
 
 
 
-def tight_bigM(out_arcs, t, d, V, A, sink, e, l ):
+def tight_bigM(out_arcs, t, d, V, A, sink, e, l, Pr=None, Dr_single=None ):
     def dijkstra(source):
         dist = {v: float('inf') for v in V}
         dist[source] = 0.0
@@ -44,6 +44,13 @@ def tight_bigM(out_arcs, t, d, V, A, sink, e, l ):
 
     Earliest = {i: max(e[i], e[0] + max(0.0, fw[i] - d[i])) for i in V}
     Latest   = {i: min(l[i],   l[sink] - max(0.0, bw[i]))       for i in V}
+    # --- request-aware precedence tightening on deliveries (direct p -> dᵣ arcs exist) ---
+    if Pr is not None and Dr_single is not None:
+        for r, dv in Dr_single.items():
+            if dv in Earliest:
+                # S[dv] must be ≥ max_p { S[p] + d[p] + t[p,dv] } using the current lower bound S[p] ≥ Earliest[p]
+                lb_dv = max(Earliest[p] + d[p] + t[(p, dv)] for p in Pr[r])
+                Earliest[dv] = max(Earliest[dv], lb_dv)
 
     # rebuild M using tightened bounds
     M_ij = {(i,j): max(0.0, Earliest[i] + d[i] + t[i,j] - Earliest[j],
