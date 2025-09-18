@@ -5,6 +5,7 @@ import itertools
 from pathlib import Path
 
 from gurobipy import GRB
+from mpdptw.common.big_M import tight_bigM
 from mpdptw.common.route_time_lifted import Run_Time_Model
 
 OUTPUT_W_SET_MODEL = 0
@@ -182,7 +183,7 @@ def build_milp_data(filename, cost_equals_time=True, speed=1.0, generate_W_set=T
             if (r[i], r[j]) not in W and (r[j], r[i]) not in W
         ]
             
-    print(f"-----------\nARCS CUTS: {len(inst["A"]) - len(inst["A_feasible_ext"])}\n-----------")
+    print(f"-----------\nINITAL ARCS: {len(inst["A"])}, ARCS CUTS: {len(inst["A"]) - len(inst["A_feasible_ext"])}\n-----------")
     return inst
 
 
@@ -245,6 +246,18 @@ def build_dictionary(filename, cost_equals_time=True, speed=1.0):
 
     deliveries_all = set(Dr_single.values())
     pickups_all    = {p for r in R for p in Pr[r]}
+        # Adjacency (restricted to A_sub)
+    in_arcs = {v: [] for v in V}
+    out_arcs = {v: [] for v in V}
+    for (i, j) in A:
+        out_arcs[i].append((i, j))
+        in_arcs[j].append((i, j))
+    e[sink] = e[0]
+    l[sink] = l[0]
+    d[sink] = 0
+    q[sink] = 0
+     
+    _, Earliest, _ = tight_bigM(out_arcs, t, d, V+[sink], A, sink, e, l)
 
     def _feasible_arc_ext(i, j):
         if i == 0 and j == sink:
@@ -261,16 +274,13 @@ def build_dictionary(filename, cost_equals_time=True, speed=1.0):
             return False
         if i == j:
             return False
-        return e_ext[i] + d_ext[i] + t_ext[(i, j)] <= l_ext[j]
+        return Earliest[i] + d_ext[i] + t_ext[(i, j)] <= l_ext[j]
 
     A_feasible_ext = [(i, j) for (i, j) in A_ext_no_loops if _feasible_arc_ext(i, j)]
+    
     # Minimal S-sets (one per request)
     S_minimal_ext = _compute_minimal_S_sets(Pr, Dr_single, sink, start=0)
-    e[sink] = e[0]
-    l[sink] = l[0]
-    d[sink] = 0
-    q[sink] = 0
-     
+
     return {
         "Nodes_To_Reqs" : node_to_req, 
         "V": V, "P": P, "D": D, "N": N, "A": A,

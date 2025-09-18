@@ -304,7 +304,7 @@ def generate_routes(instance: str, model: Model):
         total_pruned += pruned
         pruned = 0
 
-        if len(subsets_k) > 100:
+        if len(subsets_k) > 200:
             # Parallel path (capacity recheck happens inside the worker)
             batch = run_k_in_parallel(
                 subsets_k,
