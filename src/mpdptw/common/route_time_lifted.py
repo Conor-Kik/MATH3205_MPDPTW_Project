@@ -150,10 +150,6 @@ def Run_Time_Model(
     DegIn = {j: model.addConstr(quicksum(X[i, j] for (i, _) in in_arcs[j]) == 1) for j in N}
     DegOut = {i: model.addConstr(quicksum(X[i, j] for (_, j) in out_arcs[i]) == 1) for i in N}
 
-    # Depot/sink: exactly one path departs depot and arrives at sink; flow balance
-    model.addConstr(
-        quicksum(X[i, sink] for (i, _) in in_arcs[sink]) == quicksum(X[depot, j] for (_, j) in out_arcs[depot])
-    )
     model.addConstr(quicksum(X[depot, j] for (_, j) in out_arcs[depot]) == 1)
     model.addConstr(quicksum(X[j, sink] for (j, _) in in_arcs[sink]) == 1)
 
