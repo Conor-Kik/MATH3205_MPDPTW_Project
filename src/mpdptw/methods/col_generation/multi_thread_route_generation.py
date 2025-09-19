@@ -200,7 +200,11 @@ def generate_routes(instance: str, model: Model):
     path = Path(instance)
     filename = path.name
     Time_Window = not filename.startswith("w")  # "w..." instances disable TW
-
+    Narrow = filename.startswith("n") 
+    if Narrow:
+        mt_threshold = 5
+    else:
+        mt_threshold = 3
     print("USING MULTI-THREADING FOR ROUTE GENERATION")
     print("Workers to use:", psutil.cpu_count(logical=False))
 
@@ -304,7 +308,7 @@ def generate_routes(instance: str, model: Model):
         total_pruned += pruned
         pruned = 0
 
-        if len(subsets_k) > 200:
+        if  len(subsets_k) > 100 and k >= mt_threshold:
             # Parallel path (capacity recheck happens inside the worker)
             batch = run_k_in_parallel(
                 subsets_k,
