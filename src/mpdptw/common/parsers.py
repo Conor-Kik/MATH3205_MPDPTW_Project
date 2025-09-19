@@ -257,7 +257,7 @@ def build_dictionary(filename, cost_equals_time=True, speed=1.0):
     d[sink] = 0
     q[sink] = 0
      
-    _, Earliest, _ = tight_bigM(out_arcs, t, d, V+[sink], A, sink, e, l, Pr = Pr, Dr_single=Dr_single)
+    _, Earliest, Latest = tight_bigM(out_arcs, t, d, V+[sink], A, sink, e, l, Pr = Pr, Dr_single=Dr_single)
 
 
     def _feasible_arc_ext(i, j):
@@ -275,7 +275,7 @@ def build_dictionary(filename, cost_equals_time=True, speed=1.0):
             return False
         if i == j:
             return False
-        return Earliest[i] + d_ext[i] + t_ext[(i, j)] <= l_ext[j]
+        return Earliest[i] + d_ext[i] + t_ext[(i, j)] <= Latest[j]
 
     A_feasible_ext = [(i, j) for (i, j) in A_ext_no_loops if _feasible_arc_ext(i, j)]
     
