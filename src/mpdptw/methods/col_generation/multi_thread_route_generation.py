@@ -12,56 +12,9 @@ import psutil
 
 
 # ---------------------------- Configuration Flags ---------------------------- #
-VEHICLE_CAPACITY = 0  # whether to enforce capacity feasibility via re-run
+VEHICLE_CAPACITY = 1  # whether to enforce capacity feasibility via re-run
 COL_GEN_OUTPUT = 0    # Whether to show solver output of subproblem
-PRINT_ROUTES = 1      # whether to print selected routes after optimization
-
-
-# -------------------------- Capacity Check Utilities ------------------------- #
-def _is_capacity_ok(arcs, q, Q, depot, sink, EPS=1e-9):
-    """
-    Lightweight, worker-side capacity check along a constructed route.
-
-    Parameters
-    ----------
-    arcs : iterable[tuple[int, int]]
-        Set of arcs (i, j) describing a single path from depot to sink.
-    q : dict[int, float]
-        Node demands (positive pickups / negative deliveries, depending on model).
-    Q : float
-        Vehicle capacity.
-    depot : int
-        Depot node id.
-    sink : int
-        Sink node id.
-    EPS : float
-        Numerical tolerance for capacity violation.
-
-    Returns
-    -------
-    bool
-        True if capacity never exceeds Q + EPS along the path, False otherwise.
-    """
-    succ = {i: j for (i, j) in arcs}
-
-    # Reconstruct route (depot -> ... -> sink) by following successors.
-    route = [depot]
-    cur = depot
-    for _ in range(len(arcs) + 2):  # +2 safety to avoid infinite loops on malformed arcs
-        if cur == sink:
-            break
-        cur = succ.get(cur)
-        if cur is None:
-            break
-        route.append(cur)
-
-    # Accumulate load along the route and check against capacity.
-    load = 0.0
-    for v in route:
-        load += q.get(v, 0.0)
-        if load > Q + EPS:
-            return False
-    return True
+PRINT_ROUTES = 0      # whether to print selected routes after optimization
 
 
 # ----------------------- Worker Initialization for Gurobi -------------------- #
@@ -83,8 +36,6 @@ def _solve_subset(
     inst,
     Time_Window,
     threads,
-    do_capacity_check,
-    cap_params,
 ):
     """
     Solve the time-window pricing subproblem for a given subset in a worker.
@@ -93,9 +44,6 @@ def _solve_subset(
     -------
     tuple
         (ids_tuple, mask, status, s_cost, arcs, runtime)
-
-        - status can be GRB statuses, "EXC" on exception, or "CAP_FAIL" if
-          the re-run with capacity constraint is infeasible.
     """
     try:
         _m, s_cost, arcs, _, runtime = Run_Time_Model(
@@ -110,30 +58,7 @@ def _solve_subset(
         if _m.Status in (GRB.INFEASIBLE, GRB.CUTOFF):
             return (ids_tuple, mask, _m.Status, s_cost, None, runtime)
 
-        if do_capacity_check:
-            q, Q, depot, sink, EPS = cap_params
-            if not _is_capacity_ok(arcs, q, Q, depot, sink, EPS):
-                # Re-run with capacity constraints activated.
-                _m2, s_cost2, arcs2, _, runtime2 = Run_Time_Model(
-                    ids_tuple,
-                    inst,
-                    Output=COL_GEN_OUTPUT,
-                    Time_Window=Time_Window,
-                    Threads=threads,
-                    ENV=_ENV,
-                    Capacity_Constraint=True,
-                )
-                if _m2.Status in (GRB.INFEASIBLE, GRB.CUTOFF):
-                    return (ids_tuple, mask, "CAP_FAIL", s_cost2, None, None)
-                return (
-                    ids_tuple,
-                    mask,
-                    _m2.Status,
-                    s_cost2,
-                    arcs2,
-                    runtime + runtime2,
-                )
-
+        # Capacity checking and re-run removed.
         return (ids_tuple, mask, _m.Status, s_cost, arcs, runtime)
 
     except Exception as e:
@@ -149,8 +74,6 @@ def run_k_in_parallel(
     Time_Window,
     workers,
     pricing_threads,
-    do_capacity_check,
-    cap_params,
 ):
     """
     Submit all k-sized subsets to the process pool.
@@ -172,8 +95,6 @@ def run_k_in_parallel(
                 inst,
                 Time_Window,
                 pricing_threads,
-                do_capacity_check,
-                cap_params,
             )
             for ids, mask in subsets_k
         ]
@@ -186,17 +107,18 @@ def run_k_in_parallel(
 def generate_routes(instance: str, model: Model):
     """
     Generate route columns by enumerating request subsets with pruning,
-    optionally checking capacity feasibility, then solve the master problem.
+    then solve the master problem.
 
     Notes
     -----
     - Uses a frontier that grows by subset size k with early pruning:
-      * Infeasible masks (by time-window or capacity) are stored to avoid
-        exploring supersets.
+      * Infeasible masks (by time-window) are stored to avoid exploring supersets.
       * A quick service-time bound prunes obvious time-infeasible extensions.
     - Parallelization kicks in for large candidate sets.
     - Function prints summary stats and (optionally) chosen routes.
     """
+    if not PRINT_ROUTES:
+        model.setParam("OutputFlag", 0)
     path = Path(instance)
     filename = path.name
     Time_Window = not filename.startswith("w")  # "w..." instances disable TW
@@ -211,23 +133,22 @@ def generate_routes(instance: str, model: Model):
     inst = build_milp_data(str(instance), generate_W_set=False)
 
     start_time = time.perf_counter()
-
-
+    EPS = 1e-6
     R = inst["R"]
     Pr = inst["Pr"]
     Dr_single = inst["Dr_single"]
     d = inst["d"]
+
     l = inst["l"]
     V = inst["V"]
     depot = inst["depot"]
+
     Q = inst["Q"]
     q = inst["q"]
     sink = inst["sink"]
 
-    EPS = 1e-9
-    cap_params = (q, Q, depot, sink, EPS)
+    n = len(R)
 
-    # Local capacity checker for the sequential path (same as worker-side)
     def is_capacity_ok(arcs):
         succ = {i: j for (i, j) in arcs}
         route = [depot]
@@ -244,11 +165,9 @@ def generate_routes(instance: str, model: Model):
                 return False
         return True
 
-    n = len(R)
-
     # Track masks that are known infeasible to prune supersets quickly.
     infeasible_masks = set()
-
+    bad_capacity = []
     def contains_infeasible_subset(mask):
         return any((mask & bad) == bad for bad in infeasible_masks)
 
@@ -267,7 +186,6 @@ def generate_routes(instance: str, model: Model):
 
     # ------------------- Subset Streaming with Early Pruning ------------------ #
     costs = {}       # subset -> cost (objective contribution)
-    cap_fails = 0
     curr_time = time.perf_counter()
     pruned = processed = optimal_pruning = 0
     W_max = n  # upper bound on subset size
@@ -309,23 +227,21 @@ def generate_routes(instance: str, model: Model):
         pruned = 0
 
         if  len(subsets_k) > 100 and k >= mt_threshold:
-            # Parallel path (capacity recheck happens inside the worker)
+            # Parallel path
             batch = run_k_in_parallel(
                 subsets_k,
                 inst,
                 Time_Window,
                 workers=psutil.cpu_count(logical=False),
                 pricing_threads=1,
-                do_capacity_check=bool(VEHICLE_CAPACITY),
-                cap_params=cap_params,  # (q, Q, depot, sink, EPS)
             )
             for subset_ids, mask, status, s_cost, arcs, runtime in batch:
-                if status in (GRB.INFEASIBLE, GRB.CUTOFF, "EXC", "CAP_FAIL"):
-                    if status == "CAP_FAIL":
-                        cap_fails += 1
+                if status in (GRB.INFEASIBLE, GRB.CUTOFF, "EXC"):
                     add_infeasible_mask(mask)
                     pruned += 1
                     continue
+                if VEHICLE_CAPACITY and not is_capacity_ok(arcs):
+                    bad_capacity.append(subset_ids)
 
                 valid_subsets.append((subset_ids, mask, runtime))
                 costs_time[tuple(subset_ids)] = s_cost
@@ -335,7 +251,7 @@ def generate_routes(instance: str, model: Model):
                 )
                 processed += 1
         else:
-            # Sequential path (mirror the worker behavior, re-run if needed)
+            # Sequential path
             for subset_ids, mask in subsets_k:
                 _m, s_cost, arcs, _, runtime = Run_Time_Model(
                     subset_ids, inst, Time_Window=Time_Window
@@ -344,18 +260,9 @@ def generate_routes(instance: str, model: Model):
                     add_infeasible_mask(mask)
                     pruned += 1
                     continue
-
                 if VEHICLE_CAPACITY and not is_capacity_ok(arcs):
-                    # Re-run with explicit capacity constraint enforcement
-                    _m, s_cost, arcs, _, runtime2 = Run_Time_Model(
-                        subset_ids, inst,Output=COL_GEN_OUTPUT, Time_Window=Time_Window, Capacity_Constraint=True
-                    )
-                    if _m.Status in (GRB.INFEASIBLE, GRB.CUTOFF):
-                        cap_fails += 1
-                        add_infeasible_mask(mask)
-                        pruned += 1
-                        continue
-                    runtime += runtime2  # accumulate runtime for reporting
+                    bad_capacity.append(subset_ids)
+
 
                 valid_subsets.append((subset_ids, mask, runtime))
                 costs_time[tuple(subset_ids)] = s_cost
@@ -379,7 +286,6 @@ def generate_routes(instance: str, model: Model):
 
         # heuristic: process longer-running subsets first
         valid_subsets.sort(key=lambda x: x[2], reverse=True)
-
         for ids, mask, _ in valid_subsets:
             start = ids[-1] + 1
             for p in range(start, n):
@@ -404,35 +310,77 @@ def generate_routes(instance: str, model: Model):
         f"Subsets (≤ length {max_n - 1}) pruned from infeasible: "
         f"{sum(comb(n, k) for k in range(1, max_n)) - processed - total_pruned}"
     )
-    if VEHICLE_CAPACITY:
-        print(f"Capacity re-checks that failed: {cap_fails}")
-    print("**********************************************")
-
     # Map each request to all subsets that contain it
     result = {i: [] for i in range(len(R))}
     for s in costs.keys():
         for elem in s:
             result[elem].append(s)
 
-    # Master selection variables over generated subsets
-    Z = {p: model.addVar(vtype=GRB.BINARY) for p in costs}
+    
+    original_obj = None
+    def build_and_optimize():
+        nonlocal original_obj
+        model.reset()
+        # Binary selection variables per generated subset
+        Z = {p: model.addVar(vtype=GRB.BINARY) for p in costs}
 
-    # Minimize total cost
-    model.setObjective(quicksum(Z[p] * costs[p] for p in costs.keys()), GRB.MINIMIZE)
+        # Objective: minimize total cost
+        model.setObjective(
+            quicksum(Z[p] * costs[p] for p in costs.keys()), GRB.MINIMIZE
+        )
 
-    # Each request must be covered exactly once
-    OneRequest = {
-        r: model.addConstr(quicksum(Z[ss] for ss in result[r]) == 1) for r in R
-    }
+        # Cover each request exactly once
+        for r in R:
+            model.addConstr(quicksum(Z[ss] for ss in result[r]) == 1)
+        model.optimize()
+        if not original_obj:
+            original_obj = model.ObjVal
+        return Z
+    
+    Z = build_and_optimize()
 
-    if not PRINT_ROUTES:
-        model.setParam("OutputFlag", 0)
+    if VEHICLE_CAPACITY:
+        print("**********************************************")
+        print("CHECKING CAPACITY VIOLATIONS")
+        k = 1
+        while True:
+            print("**********************************************")
+            print(f"Iteration: {k}")
+            routes = [route for route in Z if Z[route].X > 0.5]
+            changed = False
+            for route in routes:
+                if route not in bad_capacity:
+                    continue
+                _m, s_cost, _, _, runtime = Run_Time_Model(
+                    route, inst, Time_Window=Time_Window, Capacity_Constraint=True
+                    )
+                if _m.Status == GRB.OPTIMAL:
+                    new_cost = s_cost - sum(service_time_r[r] for r in route)
+                    if abs(new_cost - costs[route]) > EPS:
+                        
+                        print(f"Updated {route} cost from {costs[route]:.2f} to {new_cost:.2f}")
+                        costs[route] = new_cost
+                        bad_capacity.remove(route)
+                        changed = True
+                else:
+                    del costs[route]
+                    for r in route:
+                        result[r].remove(route)
+                    print(f"Removed {route} from valid route set")
+                    changed = True
+            if not changed:
+                print("ALL ROUTES MEET CAPACITY REQUIREMENTS")
+                print("**********************************************")
+                break
+            k += 1
+            Z = build_and_optimize()
 
-    model.optimize()
+
 
     end_time = time.perf_counter()
 
     # Print chosen routes or compact info per selected subset
+    
     for p in costs.keys():
         if Z[p].x > 0.5:
             if PRINT_ROUTES:
@@ -442,7 +390,9 @@ def generate_routes(instance: str, model: Model):
 
     print("**********************************************")
     print(f"Total runtime {end_time - start_time:.2f}")
-    print(f"Obj Value: {model.ObjVal:.2f}")
+    if VEHICLE_CAPACITY:
+        print(f"Uncapacitated Obj Value: {original_obj:.2f}")
+    print(f"{"Capacitated " if VEHICLE_CAPACITY else ''}Obj Value: {model.ObjVal:.2f}")
     print("**********************************************")
 
 

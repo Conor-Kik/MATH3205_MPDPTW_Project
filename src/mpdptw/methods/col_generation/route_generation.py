@@ -8,9 +8,9 @@ from pathlib import Path
 from math import comb
 
 # ---------------------------- Configuration Flags ---------------------------- #
-VEHICLE_CAPACITY = 0  # set to 1 to add vehicle capacity constraints (re-run check)
+VEHICLE_CAPACITY = 1  # set to 1 to add vehicle capacity constraints (re-run check)
 COL_GEN_OUTPUT = 0    # Whether to show solver output of subproblem
-PRINT_ROUTES = 1      # set to 1 to print full routes instead of compact output
+PRINT_ROUTES = 0      # set to 1 to print full routes instead of compact output
 
 
 # --------------------------------- Main Logic -------------------------------- #
@@ -31,7 +31,8 @@ def generate_routes(instance: str, model: Model):
     """
     if VEHICLE_CAPACITY:
         print("Running with Vehicle Capacity Constraints")
-
+    if not PRINT_ROUTES:
+        model.setParam("OutputFlag", 0)
     # Parse instance and basic settings
     inst = build_milp_data(str(instance), generate_W_set=False)
     start_time = time.perf_counter()
@@ -43,7 +44,7 @@ def generate_routes(instance: str, model: Model):
     R = inst["R"]
     Pr = inst["Pr"]
     Dr_single = inst["Dr_single"]
-    EPS = 1e-9
+    EPS = 1e-6
     Q = inst["Q"]
     d = inst["d"]
     q = inst["q"]
@@ -51,24 +52,17 @@ def generate_routes(instance: str, model: Model):
     sink = inst["sink"]
     l    = inst["l"]
 
-    # ------------------------ Lightweight capacity check --------------------- #
-    def is_capacity_ok(arcs):
-        """
-        Follow successor pointers from depot to sink, accumulating node loads.
-        Returns False upon exceeding capacity Q + EPS at any point.
-        """
-        succ = {i: j for (i, j) in arcs}
+    n = len(R)
 
-        # Reconstruct route (depot -> ... -> sink) using successor map
+    def is_capacity_ok(arcs):
+        succ = {i: j for (i, j) in arcs}
         route = [depot]
         cur = depot
-        for _ in range(len(arcs) + 2):  # +2 safety margin
+        for _ in range(len(arcs) + 2):
             if cur == sink:
                 break
             cur = succ[cur]
             route.append(cur)
-
-        # Accumulate load and compare to capacity
         load = 0.0
         for v in route:
             load += q.get(v, 0.0)
@@ -76,11 +70,9 @@ def generate_routes(instance: str, model: Model):
                 return False
         return True
 
-    n = len(R)
-
     # ----------------- Infeasible-subset masks for early pruning -------------- #
     infeasible_masks = set()
-
+    bad_capacity = []
     def contains_infeasible_subset(mask):
         """Return True if 'mask' contains any known infeasible submask."""
         return any((mask & bad) == bad for bad in infeasible_masks)
@@ -104,7 +96,6 @@ def generate_routes(instance: str, model: Model):
     # ------------------- Subset Streaming with Early Pruning (sequential) ------------------ #
 
     costs = {}       # subset -> cost (objective contribution)
-    cap_fails = 0
     curr_time = time.perf_counter()
     pruned = processed = optimal_pruning = 0
     W_max = n  # upper bound on subset size
@@ -154,22 +145,9 @@ def generate_routes(instance: str, model: Model):
                 add_infeasible_mask(mask)
                 pruned += 1
                 continue
-
-            # Optional capacity re-check; if violated, re-run with capacity constraint
             if VEHICLE_CAPACITY and not is_capacity_ok(arcs):
-                _m, s_cost, arcs, _, runtime2 = Run_Time_Model(
-                    subset_ids,
-                    inst,
-                    Output=COL_GEN_OUTPUT,
-                    Time_Window=Time_Window,
-                    Capacity_Constraint=True,
-                )
-                if _m.Status in (GRB.INFEASIBLE, GRB.CUTOFF):
-                    cap_fails += 1
-                    add_infeasible_mask(mask)
-                    pruned += 1
-                    continue
-                runtime += runtime2  # accumulate runtime for reporting
+                bad_capacity.append(subset_ids)
+
 
             # Keep for frontier extension and cost computation
             valid_subsets.append((subset_ids, mask, runtime))
@@ -215,9 +193,6 @@ def generate_routes(instance: str, model: Model):
         f"Subsets (≤ length {max_n - 1}) pruned from infeasible: "
         f"{sum(comb(n, k) for k in range(1, max_n)) - processed - total_pruned}"
     )
-    if VEHICLE_CAPACITY:
-        print(f"Capacity re-checks that failed: {cap_fails}")
-    print("**********************************************")
 
 
     # ------------------------- Master Problem Assembly ------------------------ #
@@ -227,20 +202,64 @@ def generate_routes(instance: str, model: Model):
         for elem in s:
             result[elem].append(s)
 
-    # Binary selection variables per generated subset
-    Z = {p: model.addVar(vtype=GRB.BINARY) for p in costs}
 
-    # Objective: minimize total cost
-    model.setObjective(
-        quicksum(Z[p] * costs[p] for p in costs.keys()), GRB.MINIMIZE
-    )
+    original_obj = None
+    def build_and_optimize():
+        nonlocal original_obj
+        model.reset()
+        # Binary selection variables per generated subset
+        Z = {p: model.addVar(vtype=GRB.BINARY) for p in costs}
 
-    # Cover each request exactly once
-    for r in R:
-        model.addConstr(quicksum(Z[ss] for ss in result[r]) == 1)
+        # Objective: minimize total cost
+        model.setObjective(
+            quicksum(Z[p] * costs[p] for p in costs.keys()), GRB.MINIMIZE
+        )
 
-    # Optimize master problem
-    model.optimize()
+        # Cover each request exactly once
+        for r in R:
+            model.addConstr(quicksum(Z[ss] for ss in result[r]) == 1)
+        model.optimize()
+        if not original_obj:
+            original_obj = model.ObjVal
+        return Z
+    
+    Z = build_and_optimize()
+    if VEHICLE_CAPACITY:
+        print("**********************************************")
+        print("CHECKING CAPACITY VIOLATIONS")
+        k = 1
+        while True:
+            print("**********************************************")
+            print(f"Iteration: {k}")
+            routes = [route for route in Z if Z[route].X > 0.5]
+            changed = False
+            for route in routes:
+                if route not in bad_capacity:
+                    continue
+                _m, s_cost, _, _, runtime = Run_Time_Model(
+                    route, inst, Time_Window=Time_Window, Capacity_Constraint=True
+                    )
+                if _m.Status == GRB.OPTIMAL:
+                    new_cost = s_cost - sum(service_time_r[r] for r in route)
+                    if abs(new_cost - costs[route]) > EPS:
+                        print(f"Updated {route} cost from {costs[route]:.2f} to {new_cost:.2f}")
+                        costs[route] = new_cost
+                        changed = True
+                else:
+                    del costs[route]
+                    for r in route:
+                        result[r].remove(route)
+                    print(f"Removed {route} from valid route set")
+                    changed = True
+            if not changed:
+                print("ALL ROUTES MEET CAPACITY REQUIREMENTS")
+                print("**********************************************")
+                break
+            k += 1
+            Z = build_and_optimize()
+            
+
+    
     end_time = time.perf_counter()
 
     # Report chosen subsets
@@ -249,11 +268,13 @@ def generate_routes(instance: str, model: Model):
             if PRINT_ROUTES:
                 print_subset_solution(inst, p, VEHICLE_CAPACITY)
             else:
-                print("\nRequests:", list(p), "Cost:", round(costs[p], 2))
+                print("Requests:", list(p), "Cost:", round(costs[p], 2))
 
     print("**********************************************")
     print(f"Total runtime {end_time - start_time:.2f}")
-    print(f"Obj Value: {model.ObjVal:.2f}")
+    if VEHICLE_CAPACITY:
+        print(f"Uncapacitated Obj Value: {original_obj:.2f}")
+    print(f"{"Capacitate" if VEHICLE_CAPACITY else ''}Obj Value: {model.ObjVal:.2f}")
     print("**********************************************")
 
 
