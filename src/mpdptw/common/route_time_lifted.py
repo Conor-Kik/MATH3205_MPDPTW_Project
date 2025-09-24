@@ -333,7 +333,7 @@ def Run_Time_Model(
                 cut_added |= add_cut_once(key, expr, len(S))
 
     model.Params.LazyConstraints = 1
-    if not Time_Window:
+    if not Time_Window and not Capacity_Constraint:
         model.Params.Heuristics = 0
 
     # ------------------------------- Solve & returns ------------------------------ #

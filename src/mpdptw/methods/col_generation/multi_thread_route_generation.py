@@ -12,7 +12,7 @@ import psutil
 
 
 # ---------------------------- Configuration Flags ---------------------------- #
-VEHICLE_CAPACITY = 1  # whether to enforce capacity feasibility via re-run
+VEHICLE_CAPACITY = 1 # whether to enforce capacity feasibility via re-run
 COL_GEN_OUTPUT = 0    # Whether to show solver output of subproblem
 PRINT_ROUTES = 0      # whether to print selected routes after optimization
 
@@ -142,7 +142,7 @@ def generate_routes(instance: str, model: Model):
     l = inst["l"]
     V = inst["V"]
     depot = inst["depot"]
-
+    K = len(inst["K"])  # vehicles
     Q = inst["Q"]
     q = inst["q"]
     sink = inst["sink"]
@@ -171,18 +171,6 @@ def generate_routes(instance: str, model: Model):
     def contains_infeasible_subset(mask):
         return any((mask & bad) == bad for bad in infeasible_masks)
 
-    def add_infeasible_mask(mask):
-        """
-        Maintain a minimal family: keep only masks that are not supersets
-        of existing ones (and remove those that are supersets of the new one).
-        """
-        for bad in infeasible_masks:
-            if (mask & bad) == bad:  # existing ⊆ new
-                return
-        to_remove = [bad for bad in infeasible_masks if (bad & mask) == mask]
-        for bad in to_remove:
-            infeasible_masks.remove(bad)
-        infeasible_masks.add(mask)
 
     # ------------------- Subset Streaming with Early Pruning ------------------ #
     costs = {}       # subset -> cost (objective contribution)
@@ -237,7 +225,7 @@ def generate_routes(instance: str, model: Model):
             )
             for subset_ids, mask, status, s_cost, arcs, runtime in batch:
                 if status in (GRB.INFEASIBLE, GRB.CUTOFF, "EXC"):
-                    add_infeasible_mask(mask)
+                    infeasible_masks.add(mask)
                     pruned += 1
                     continue
                 if VEHICLE_CAPACITY and not is_capacity_ok(arcs):
@@ -257,7 +245,7 @@ def generate_routes(instance: str, model: Model):
                     subset_ids, inst, Time_Window=Time_Window
                 )
                 if _m.Status in (GRB.INFEASIBLE, GRB.CUTOFF):
-                    add_infeasible_mask(mask)
+                    infeasible_masks.add(mask)
                     pruned += 1
                     continue
                 if VEHICLE_CAPACITY and not is_capacity_ok(arcs):
@@ -315,7 +303,6 @@ def generate_routes(instance: str, model: Model):
     for s in costs.keys():
         for elem in s:
             result[elem].append(s)
-
     
     original_obj = None
     def build_and_optimize():
@@ -328,7 +315,7 @@ def generate_routes(instance: str, model: Model):
         model.setObjective(
             quicksum(Z[p] * costs[p] for p in costs.keys()), GRB.MINIMIZE
         )
-
+        model.addConstr(quicksum(Z[p] for p in costs) <= K)
         # Cover each request exactly once
         for r in R:
             model.addConstr(quicksum(Z[ss] for ss in result[r]) == 1)
@@ -337,12 +324,15 @@ def generate_routes(instance: str, model: Model):
             original_obj = model.ObjVal
         return Z
     
+   
     Z = build_and_optimize()
+    end_time = time.perf_counter()
 
     if VEHICLE_CAPACITY:
         print("**********************************************")
         print("CHECKING CAPACITY VIOLATIONS")
         k = 1
+        cap_start_time = time.perf_counter()
         while True:
             print("**********************************************")
             print(f"Iteration: {k}")
@@ -363,24 +353,30 @@ def generate_routes(instance: str, model: Model):
                         bad_capacity.remove(route)
                         changed = True
                 else:
+                    # remove the infeasible route itself
                     del costs[route]
                     for r in route:
                         result[r].remove(route)
                     print(f"Removed {route} from valid route set")
+
+                    # additionally prune any supersets of this route
+                    for sup in list(costs.keys()):
+                        if set(route).issubset(sup):
+                            del costs[sup]
+                            for r in sup:
+                                result[r].remove(sup)
+                            print(f"Removed superset {sup}")
+
                     changed = True
+
             if not changed:
                 print("ALL ROUTES MEET CAPACITY REQUIREMENTS")
                 print("**********************************************")
                 break
             k += 1
             Z = build_and_optimize()
+        cap_end_time = time.perf_counter()
 
-
-
-    end_time = time.perf_counter()
-
-    # Print chosen routes or compact info per selected subset
-    
     for p in costs.keys():
         if Z[p].x > 0.5:
             if PRINT_ROUTES:
@@ -389,7 +385,7 @@ def generate_routes(instance: str, model: Model):
                 print("Requests:", list(p), "Cost:", round(costs[p], 2))
 
     print("**********************************************")
-    print(f"Total runtime {end_time - start_time:.2f}")
+    print(f"Column and Master runtime: {end_time - start_time:.2f}{f", Capacity Runtime: {cap_end_time-cap_start_time:.2f}" if VEHICLE_CAPACITY and k >= 2 else ''}")
     if VEHICLE_CAPACITY:
         print(f"Uncapacitated Obj Value: {original_obj:.2f}")
     print(f"{"Capacitated " if VEHICLE_CAPACITY else ''}Obj Value: {model.ObjVal:.2f}")

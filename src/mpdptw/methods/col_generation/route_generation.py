@@ -8,7 +8,7 @@ from pathlib import Path
 from math import comb
 
 # ---------------------------- Configuration Flags ---------------------------- #
-VEHICLE_CAPACITY = 1  # set to 1 to add vehicle capacity constraints (re-run check)
+VEHICLE_CAPACITY = 0  # set to 1 to add vehicle capacity constraints (re-run check)
 COL_GEN_OUTPUT = 0    # Whether to show solver output of subproblem
 PRINT_ROUTES = 0      # set to 1 to print full routes instead of compact output
 
@@ -45,6 +45,7 @@ def generate_routes(instance: str, model: Model):
     Pr = inst["Pr"]
     Dr_single = inst["Dr_single"]
     EPS = 1e-6
+    K = len(inst["K"])  # vehicles
     Q = inst["Q"]
     d = inst["d"]
     q = inst["q"]
@@ -77,20 +78,6 @@ def generate_routes(instance: str, model: Model):
         """Return True if 'mask' contains any known infeasible submask."""
         return any((mask & bad) == bad for bad in infeasible_masks)
 
-    def add_infeasible_mask(mask):
-        """
-        Maintain a minimal family of infeasible masks:
-        - If an existing mask is subset of 'mask', we keep the existing one
-          (and skip adding 'mask').
-        - Remove any existing masks that are supersets of the new one, then add.
-        """
-        for bad in infeasible_masks:
-            if (mask & bad) == bad:  # existing ⊆ new -> no need to add
-                return
-        to_remove = [bad for bad in infeasible_masks if (bad & mask) == mask]
-        for bad in to_remove:
-            infeasible_masks.remove(bad)
-        infeasible_masks.add(mask)
 
 
     # ------------------- Subset Streaming with Early Pruning (sequential) ------------------ #
@@ -142,7 +129,7 @@ def generate_routes(instance: str, model: Model):
                 subset_ids, inst, Time_Window=Time_Window
             )
             if _m.Status in (GRB.INFEASIBLE, GRB.CUTOFF):
-                add_infeasible_mask(mask)
+                infeasible_masks.add(mask)
                 pruned += 1
                 continue
             if VEHICLE_CAPACITY and not is_capacity_ok(arcs):
@@ -214,7 +201,7 @@ def generate_routes(instance: str, model: Model):
         model.setObjective(
             quicksum(Z[p] * costs[p] for p in costs.keys()), GRB.MINIMIZE
         )
-
+        model.addConstr(quicksum(Z[p] for p in costs) <= K)
         # Cover each request exactly once
         for r in R:
             model.addConstr(quicksum(Z[ss] for ss in result[r]) == 1)
@@ -224,10 +211,13 @@ def generate_routes(instance: str, model: Model):
         return Z
     
     Z = build_and_optimize()
+    end_time = time.perf_counter()
+
     if VEHICLE_CAPACITY:
         print("**********************************************")
         print("CHECKING CAPACITY VIOLATIONS")
         k = 1
+        cap_start_time = time.perf_counter()
         while True:
             print("**********************************************")
             print(f"Iteration: {k}")
@@ -242,39 +232,48 @@ def generate_routes(instance: str, model: Model):
                 if _m.Status == GRB.OPTIMAL:
                     new_cost = s_cost - sum(service_time_r[r] for r in route)
                     if abs(new_cost - costs[route]) > EPS:
+                        
                         print(f"Updated {route} cost from {costs[route]:.2f} to {new_cost:.2f}")
                         costs[route] = new_cost
+                        bad_capacity.remove(route)
                         changed = True
                 else:
+                    # remove the infeasible route itself
                     del costs[route]
                     for r in route:
                         result[r].remove(route)
                     print(f"Removed {route} from valid route set")
+
+                    # additionally prune any supersets of this route
+                    for sup in list(costs.keys()):
+                        if set(route).issubset(sup):
+                            del costs[sup]
+                            for r in sup:
+                                result[r].remove(sup)
+                            print(f"Removed superset {sup}")
+
                     changed = True
+
             if not changed:
                 print("ALL ROUTES MEET CAPACITY REQUIREMENTS")
                 print("**********************************************")
                 break
             k += 1
             Z = build_and_optimize()
-            
+        cap_end_time = time.perf_counter()
 
-    
-    end_time = time.perf_counter()
-
-    # Report chosen subsets
     for p in costs.keys():
         if Z[p].x > 0.5:
             if PRINT_ROUTES:
-                print_subset_solution(inst, p, VEHICLE_CAPACITY)
+                print_subset_solution(inst, p, Capacity_Constraint=VEHICLE_CAPACITY)
             else:
                 print("Requests:", list(p), "Cost:", round(costs[p], 2))
 
     print("**********************************************")
-    print(f"Total runtime {end_time - start_time:.2f}")
+    print(f"Column and Master runtime: {end_time - start_time:.2f}{f", Capacity Runtime: {cap_end_time-cap_start_time:.2f}" if VEHICLE_CAPACITY else ''}")
     if VEHICLE_CAPACITY:
         print(f"Uncapacitated Obj Value: {original_obj:.2f}")
-    print(f"{"Capacitate" if VEHICLE_CAPACITY else ''}Obj Value: {model.ObjVal:.2f}")
+    print(f"{"Capacitated " if VEHICLE_CAPACITY else ''}Obj Value: {model.ObjVal:.2f}")
     print("**********************************************")
 
 
