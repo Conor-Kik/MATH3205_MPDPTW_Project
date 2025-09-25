@@ -7,7 +7,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
 # Registry: map method -> "module.path:callable"
 REGISTRY: Dict[str, str] = {
     "two_index": "mpdptw.methods.two_index.MPDTW_Solver_Two:main",
-    "three_index": "mpdptw.methods.three_index.MPDTW_Solver:main",
+    "three_index": "mpdptw.methods.three_index.MPDTW_Solver_Three:main",
     "arf": "mpdptw.methods.arf.MPDTW_Solver_Arf:main",
     "col_gen": "mpdptw.methods.col_generation.route_generation:main",
     "col_gen_mt": "mpdptw.methods.col_generation.multi_thread_route_generation:main",
