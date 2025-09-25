@@ -1,11 +1,16 @@
+import time
 from mpdptw.common.cli import parse_instance_argv
 from mpdptw.common.printers.three_index_printer import print_solution_summary
 from mpdptw.common.parsers import build_milp_data
 from gurobipy import *
 
 
-def Run_Model(inst, model: Model):
+def Run_Model(path, model: Model):
     EPS = 1e-6
+
+
+    start_time = time.perf_counter()
+    inst = build_milp_data(str(path))
     # Sets (extended with sink depot)
     V = inst["V_ext"]  # all nodes including origin (0) and sink
     A = inst["A_feasible_ext"]  # feasible arcs 
@@ -17,7 +22,7 @@ def Run_Model(inst, model: Model):
     Dr = inst["Dr"]  # deliveries per request
     Dr_single = inst["Dr_single"]  # single delivery per request
     S_min = inst["S_minimal_ext"]  # minimal S-sets from paper
-
+    
     # Build adjacency from A once 
     A_minus  = {j: [] for j in V}
     A_plus = {i: [] for i in V}
@@ -113,16 +118,25 @@ def Run_Model(inst, model: Model):
     model.addConstr(d[i] + S[i] + t[i, Dr_single[r]] <= S[Dr_single[r]])
     for r in R for i in Pr[r]}
     
-    
+    model.setParam('TimeLimit', 3600)
     model.optimize()
+    end_time = time.perf_counter()
+    #print_solution_summary(model, V_ext, R, K, Pr, Dr, X, S, e, l, q, t=t, sink=sink, d=d)
+    print()
+    if model.SolCount > 0:
+        UB = model.ObjVal
+    else:
+        UB = float('inf')  # no feasible solution, UB = +∞
 
-    print_solution_summary(model, V_ext, R, K, Pr, Dr, X, S, e, l, q, t=t, sink=sink, d=d)
-    
+    print("Best Upper Bound (UB):", "∞" if UB == float('inf') else round(UB, 2))
+    print("Best Bound (LB):", round(model.ObjBound, 2))
+    print("MIP Gap:", round(model.MIPGap, 2))
+    print("TIME:", round(end_time - start_time, 2))
+    print("Work units used:", round(model.Work, 2))
 def main(argv=None):
     path, _ = parse_instance_argv(argv, default_filename="l_4_25_4.txt")
-    inst = build_milp_data(str(path))
     model = Model("MPDTW")
-    Run_Model(inst, model)
+    Run_Model(path, model)
 
 
 if __name__ == "__main__":

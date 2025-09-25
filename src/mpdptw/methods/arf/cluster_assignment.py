@@ -140,4 +140,4 @@ def Run_Cluster_Assignment_Model(inst, model: Model, W, time_limit, outputflag):
         print("e_i", e_i)
         #print("e_ij", e_ij)
 
-    return extract_order(U, R)
+    return extract_order(U, R), model.Work

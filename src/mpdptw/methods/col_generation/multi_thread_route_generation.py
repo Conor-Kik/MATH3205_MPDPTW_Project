@@ -12,7 +12,7 @@ import psutil
 
 
 # ---------------------------- Configuration Flags ---------------------------- #
-VEHICLE_CAPACITY = 1 # whether to enforce capacity feasibility via re-run
+VEHICLE_CAPACITY = 0 # whether to enforce capacity feasibility via re-run
 COL_GEN_OUTPUT = 0    # Whether to show solver output of subproblem
 PRINT_ROUTES = 0      # whether to print selected routes after optimization
 
@@ -46,7 +46,7 @@ def _solve_subset(
         (ids_tuple, mask, status, s_cost, arcs, runtime)
     """
     try:
-        _m, s_cost, arcs, _, runtime = Run_Time_Model(
+        _m, s_cost, arcs, _, runtime, work = Run_Time_Model(
             ids_tuple,
             inst,
             False,
@@ -54,12 +54,7 @@ def _solve_subset(
             Threads=threads,
             ENV=_ENV,
         )
-
-        if _m.Status in (GRB.INFEASIBLE, GRB.CUTOFF):
-            return (ids_tuple, mask, _m.Status, s_cost, None, runtime)
-
-        # Capacity checking and re-run removed.
-        return (ids_tuple, mask, _m.Status, s_cost, arcs, runtime)
+        return (ids_tuple, mask, _m.Status, s_cost, arcs, runtime, work)
 
     except Exception as e:
         # Keep worker robust and return error info upstream.
@@ -129,10 +124,10 @@ def generate_routes(instance: str, model: Model):
         mt_threshold = 3
     print("USING MULTI-THREADING FOR ROUTE GENERATION")
     print("Workers to use:", psutil.cpu_count(logical=False))
-
+    start_time = time.perf_counter()
     inst = build_milp_data(str(instance), generate_W_set=False)
 
-    start_time = time.perf_counter()
+    
     EPS = 1e-6
     R = inst["R"]
     Pr = inst["Pr"]
@@ -177,7 +172,7 @@ def generate_routes(instance: str, model: Model):
     curr_time = time.perf_counter()
     pruned = processed = optimal_pruning = 0
     W_max = n  # upper bound on subset size
-
+    total_work_units = 0
     # Precompute service time of each request's required nodes
     service_time_r = {
         r: sum(d.get(v, 0.0) for v in Pr[r]) + d.get(Dr_single[r], 0.0) for r in R
@@ -223,7 +218,8 @@ def generate_routes(instance: str, model: Model):
                 workers=psutil.cpu_count(logical=False),
                 pricing_threads=1,
             )
-            for subset_ids, mask, status, s_cost, arcs, runtime in batch:
+            for subset_ids, mask, status, s_cost, arcs, runtime, work in batch:
+                total_work_units += work
                 if status in (GRB.INFEASIBLE, GRB.CUTOFF, "EXC"):
                     infeasible_masks.add(mask)
                     pruned += 1
@@ -241,9 +237,10 @@ def generate_routes(instance: str, model: Model):
         else:
             # Sequential path
             for subset_ids, mask in subsets_k:
-                _m, s_cost, arcs, _, runtime = Run_Time_Model(
+                _m, s_cost, arcs, _, runtime, work = Run_Time_Model(
                     subset_ids, inst, Time_Window=Time_Window
                 )
+                total_work_units += work
                 if _m.Status in (GRB.INFEASIBLE, GRB.CUTOFF):
                     infeasible_masks.add(mask)
                     pruned += 1
@@ -341,9 +338,10 @@ def generate_routes(instance: str, model: Model):
             for route in routes:
                 if route not in bad_capacity:
                     continue
-                _m, s_cost, _, _, runtime = Run_Time_Model(
+                _m, s_cost, _, _, runtime, work = Run_Time_Model(
                     route, inst, Time_Window=Time_Window, Capacity_Constraint=True
                     )
+                total_work_units += work
                 if _m.Status == GRB.OPTIMAL:
                     new_cost = s_cost - sum(service_time_r[r] for r in route)
                     if abs(new_cost - costs[route]) > EPS:
@@ -389,6 +387,7 @@ def generate_routes(instance: str, model: Model):
     if VEHICLE_CAPACITY:
         print(f"Uncapacitated Obj Value: {original_obj:.2f}")
     print(f"{"Capacitated " if VEHICLE_CAPACITY else ''}Obj Value: {model.ObjVal:.2f}")
+    print(f"Total Work Units: {total_work_units:.2f}")
     print("**********************************************")
 
 

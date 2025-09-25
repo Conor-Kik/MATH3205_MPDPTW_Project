@@ -34,8 +34,9 @@ def generate_routes(instance: str, model: Model):
     if not PRINT_ROUTES:
         model.setParam("OutputFlag", 0)
     # Parse instance and basic settings
-    inst = build_milp_data(str(instance), generate_W_set=False)
     start_time = time.perf_counter()
+    inst = build_milp_data(str(instance), generate_W_set=False)
+    
     path = Path(instance)
     filename = path.name
     Time_Window = not filename.startswith("w")  # "w..." instances disable TW
@@ -54,7 +55,7 @@ def generate_routes(instance: str, model: Model):
     l    = inst["l"]
 
     n = len(R)
-
+    total_work_units = 0
     def is_capacity_ok(arcs):
         succ = {i: j for (i, j) in arcs}
         route = [depot]
@@ -121,13 +122,13 @@ def generate_routes(instance: str, model: Model):
         start_process = processed
         total_pruned += pruned
         pruned = 0
-
         # ------------------------- Sequential processing path ------------------------- #
         for subset_ids, mask in subsets_k:
             # First pass (no explicit capacity constraint)
-            _m, s_cost, arcs, _, runtime = Run_Time_Model(
+            _m, s_cost, arcs, _, runtime, work = Run_Time_Model(
                 subset_ids, inst, Time_Window=Time_Window
             )
+            total_work_units += work
             if _m.Status in (GRB.INFEASIBLE, GRB.CUTOFF):
                 infeasible_masks.add(mask)
                 pruned += 1
@@ -226,9 +227,10 @@ def generate_routes(instance: str, model: Model):
             for route in routes:
                 if route not in bad_capacity:
                     continue
-                _m, s_cost, _, _, runtime = Run_Time_Model(
+                _m, s_cost, _, _, _, work = Run_Time_Model(
                     route, inst, Time_Window=Time_Window, Capacity_Constraint=True
                     )
+                total_work_units += work
                 if _m.Status == GRB.OPTIMAL:
                     new_cost = s_cost - sum(service_time_r[r] for r in route)
                     if abs(new_cost - costs[route]) > EPS:
@@ -274,6 +276,7 @@ def generate_routes(instance: str, model: Model):
     if VEHICLE_CAPACITY:
         print(f"Uncapacitated Obj Value: {original_obj:.2f}")
     print(f"{"Capacitated " if VEHICLE_CAPACITY else ''}Obj Value: {model.ObjVal:.2f}")
+    print(f"Total Work Units: {total_work_units:.2f}")
     print("**********************************************")
 
 

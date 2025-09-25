@@ -61,7 +61,7 @@ def Run_Model(path, model: Model):
     # Infeasible request pairs, then ordering MIP (returns rank and pos)
     #W = Infeasible_Req_Pairs(R, e, l, Pr, Dr_single, c, q, sink, d, Q, inst, output_flag=OUTPUT_REQ_MODEL)
     W = inst["W"]
-    rank, pos = Run_Cluster_Assignment_Model(inst, cluster_model, W, PREPROCESSING_CUTOFF, outputflag = OUTPUT_CLUSTER_MODEL)  # rank[i] = position, pos[k] = request
+    (rank, pos), cluster_work = Run_Cluster_Assignment_Model(inst, cluster_model, W, PREPROCESSING_CUTOFF, outputflag = OUTPUT_CLUSTER_MODEL)  # rank[i] = position, pos[k] = request
 
     # Helpers (depots have no request)
     def req_of(i): 
@@ -194,10 +194,10 @@ def Run_Model(path, model: Model):
     
     end = time.perf_counter()
     # Optimize & print
-
+    model.setParam('TimeLimit', 3600)
     model.optimize()
     
-    if True:
+    if False:
         print_solution_summary(
             model,
             V_ext,          
@@ -214,6 +214,18 @@ def Run_Model(path, model: Model):
     print(f"PREPROCESSING RUNTIME: {end - start:.2f}{' - (Cluster Model cutoff activated at ' + str(PREPROCESSING_CUTOFF) + " Seconds)" if (end - start) > PREPROCESSING_CUTOFF else ''}")
     print(f"MODEL RUNTIME: {model.Runtime:.2f}")
     print(f"TOTAL: {model.Runtime + end - start:.2f}")
+
+    print()
+    if model.SolCount > 0:
+        UB = model.ObjVal
+    else:
+        UB = float('inf')  # no feasible solution, UB = +∞
+
+    print("Best Upper Bound (UB):", "∞" if UB == float('inf') else round(UB, 2))
+    print("Best Bound (LB):", round(model.ObjBound, 2))
+    print("MIP Gap:", round(model.MIPGap, 2))
+    print(f"TOTAL: {model.Runtime + end - start:.2f}")
+    print("Work units used:", round(model.Work + cluster_work, 2))
 
 def main(argv=None):
     path, _ = parse_instance_argv(argv, default_filename="l_4_25_4.txt")

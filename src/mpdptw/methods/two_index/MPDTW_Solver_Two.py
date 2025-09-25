@@ -1,3 +1,4 @@
+import time
 from mpdptw.common.cli import parse_instance_argv
 from mpdptw.common.printers.two_index_solution_printer import print_solution_summary
 from mpdptw.common.parsers import build_milp_data
@@ -6,6 +7,7 @@ import re
 from mpdptw.common.big_M import tight_bigM
 
 def Run_Model(path, model: Model):
+    start_time = time.perf_counter()
     inst = build_milp_data(str(path))
 
 
@@ -297,11 +299,20 @@ def Run_Model(path, model: Model):
                     expr = sum_x_within(S | {p}) + sum_x(S, {sink})
                     cut_added |= add_cut_once(key, expr, len(S))
 
-    
+    model.setParam('TimeLimit', 3600)
     model.optimize(subtour_callback)
+    end_time = time.perf_counter()
+    #print_solution_summary(model, V_ext, R, K, Pr, Dr, X, S, e, l, q, t=t, sink=sink, d=d)
+    if model.SolCount > 0:
+        UB = model.ObjVal
+    else:
+        UB = float('inf')  # no feasible solution, UB = +∞
 
-    print_solution_summary(model, V_ext, R, K, Pr, Dr, X, S, e, l, q, t=t, sink=sink, d=d)
-
+    print("Best Upper Bound (UB):", "∞" if UB == float('inf') else round(UB, 2))
+    print("Best Bound (LB):", round(model.ObjBound, 2))
+    print("MIP Gap:", round(model.MIPGap, 2))
+    print("TIME:", round(end_time - start_time, 2))
+    print("Work units used:", round(model.Work, 2))
 def main(argv=None):
     path, _ = parse_instance_argv(argv, default_filename="l_4_25_4.txt")
     model = Model("MPDTW")

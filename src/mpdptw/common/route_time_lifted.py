@@ -344,10 +344,10 @@ def Run_Time_Model(
     if model.Status == GRB.OPTIMAL:
         used_arcs = [(i, j) for (i, j) in X if X[i, j].X > 0.5]
         if not Time_Window:
-            return model, model.ObjVal, used_arcs, None, model.Runtime
+            return model, model.ObjVal, used_arcs, None, model.Runtime, model.Work
         else:
             # Include realized service start times S[i] only when time windows are modeled
-            return model, model.ObjVal, used_arcs, {i: S[i].X for i in S}, model.Runtime
+            return model, model.ObjVal, used_arcs, {i: S[i].X for i in S}, model.Runtime, model.Work
     else:
         # Not proven optimal (e.g., TIME_LIMIT, INFEASIBLE, etc.)
-        return model, None, [], None, None
+        return model, None, [], None, None, model.Work

@@ -173,7 +173,7 @@ def build_milp_data(filename, cost_equals_time=True, speed=1.0, generate_W_set=T
     if generate_W_set:
         W = []
         for r1, r2 in itertools.combinations(R, 2):
-            _m, _, _, _, _ = Run_Time_Model([r1,r2], inst, Time_Window=True)
+            _m, _, _, _, _, _ = Run_Time_Model([r1,r2], inst, Time_Window=True)
             feasible = _m.Status == GRB.OPTIMAL
             if not feasible:
                 W.append((r1, r2))
@@ -183,7 +183,7 @@ def build_milp_data(filename, cost_equals_time=True, speed=1.0, generate_W_set=T
             if (r[i], r[j]) not in W and (r[j], r[i]) not in W
         ]
             
-    print(f"-----------\nINITAL ARCS: {len(inst["A"])}, ARCS CUTS: {len(inst["A"]) - len(inst["A_feasible_ext"])}\n-----------")
+    print(f"-----------\nINITAL ARCS: {len(inst["A"])}, ARCS CUTS: {len(inst["A"]) - len(inst["A_feasible_ext"])}, FINAL {len(inst["A_feasible_ext"])}\n-----------")
     return inst
 
 
@@ -208,7 +208,6 @@ def build_dictionary(filename, cost_equals_time=True, speed=1.0):
     Pr = {r: list(inst["R"][r]["pickups"])    for r in R}
     Dr = {r: list(inst["R"][r]["deliveries"]) for r in R}
     A = [(i, j) for i in V for j in V]  
-
     # Parameters
     K = range(int(inst["vehicles"]))
     Q = inst["capacity"]
