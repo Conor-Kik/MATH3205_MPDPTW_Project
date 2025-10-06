@@ -136,7 +136,7 @@ def Run_Time_Model(
     # --------------------------- Optional time windows --------------------------- #
     if Time_Window:
         # Tight big-Ms and bounds for S
-        M_ij, Earliest, Latest = tight_bigM(out_arcs, t, d, V, A_sub, sink, e, l, Pr=Pr, Dr_single=Dr_single)
+        M_ij, Earliest, Latest = tight_bigM(out_arcs, t, d, V, A_sub, sink, e, l, Pr={r: Pr[r] for r in R}, Dr_single={r: Dr_single[r] for r in R})
         S = {i: model.addVar(vtype=GRB.CONTINUOUS, lb=Earliest[i], ub=Latest[i]) for i in V}
 
         # Time-window feasibility on arcs
