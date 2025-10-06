@@ -1,4 +1,5 @@
 import time
+from mpdptw.common.big_M import tight_bigM
 from mpdptw.common.cli import parse_instance_argv
 from mpdptw.common.printers.three_index_printer import print_solution_summary
 from mpdptw.common.parsers import build_milp_data
@@ -33,6 +34,13 @@ def Run_Model(path, model: Model):
     K = inst["K"]  # vehicles
     Q = inst["Q"]  # capacity
 
+    in_arcs  = {j: [] for j in V}
+    out_arcs = {i: [] for i in V}
+    for (i, j) in A:
+        out_arcs[i].append((i, j))
+        in_arcs[j].append((i, j))
+    
+
     # Parameters (extended)
     e = inst["e"]  # earliest start
     l = inst["l"]  # latest start
@@ -49,18 +57,15 @@ def Run_Model(path, model: Model):
 
     #e[sink] = e[0]
     #l[sink] = l[0]
-    M_ij = {(i,j): max(0.0, l[i] + d[i] + t[i,j] - e[j]) for (i,j) in A}
-
+    M_ij, Earliest, Latest = tight_bigM(out_arcs, t, d, V, A, sink, e, l, Pr=Pr, Dr_single=Dr_single)
+    
 
     start_nodes = [j for (_, j) in A_plus[depot] if j != sink]
-    
-    print(A)
-    
-    ### NEWWWWW
+
     # Decision variables (to be declared in solver)
     X = {(i, j, k): model.addVar(vtype=GRB.BINARY) for (i, j) in A for k in K}  # binary arc use, 1 if vehicle k goes from i to j
     Y = {(r, k): model.addVar(vtype=GRB.BINARY) for r in R for k in K} #1 if request r completed by vehicle k 
-    S = {i: model.addVar(vtype=GRB.CONTINUOUS) for i in V}  # continuous service start times
+    S = {i: model.addVar(vtype=GRB.CONTINUOUS, lb=Earliest[i], ub = Latest[i]) for i in V}  # continuous service start times
     
     #NEED TO CHECK WITH BRO HOW R WORKS
     
@@ -102,18 +107,10 @@ def Run_Model(path, model: Model):
     
     ServiceOfNextNodeOnlyAfterServiceAtThisNodeAndTravel = {
     (i,j): model.addConstr(
-        S[i] + (d[i] + t[i,j] + l[sink])*(quicksum(X[i,j,k] for k in K)) - l[sink] 
+        S[i] + (d[i] + t[i,j] + M_ij[i,j])*(quicksum(X[i,j,k] for k in K)) - M_ij[i,j]
                            <= S[j])
     for (i,j) in A}
-    
-    StartingServiceTimeLowerBound= {
-    i: model.addConstr(e[i] <= S[i]) 
-    for i in V}
-    
-    StartingServiceTimeUpperBound= {
-    i: model.addConstr(S[i] <= l[i]) 
-    for i in V}
-    
+
     ServiceDeliveryNoEarlierThanServiceServiceTimeAndTravel = {(i, r): 
     model.addConstr(d[i] + S[i] + t[i, Dr_single[r]] <= S[Dr_single[r]])
     for r in R for i in Pr[r]}
