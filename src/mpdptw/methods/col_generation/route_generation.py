@@ -1,3 +1,4 @@
+import os
 from gurobipy import *
 from mpdptw.common.cli import parse_instance_argv
 from mpdptw.common.parsers import build_milp_data
@@ -9,9 +10,7 @@ from math import comb
 
 # ---------------------------- Configuration Flags ---------------------------- #
 VEHICLE_CAPACITY = 0  # set to 1 to add vehicle capacity constraints (re-run check)
-COL_GEN_OUTPUT = 0    # Whether to show solver output of subproblem
-PRINT_ROUTES = 0      # set to 1 to print full routes instead of compact output
-
+PRINT_ROUTES = 1      # set to 1 to print full routes instead of compact output
 
 # --------------------------------- Main Logic -------------------------------- #
 def generate_routes(instance: str, model: Model):
@@ -164,7 +163,7 @@ def generate_routes(instance: str, model: Model):
                 if contains_infeasible_subset(new_mask):
                     continue
                 #Lemma 2 - Quick feasibility bound: s_cost + service_time_r[p] <= l[depot] 
-                if costs_time[tuple(ids)] + service_time_r[p] > l[depot]:
+                if costs_time[tuple(ids)] + service_time_r[p] > l[depot] + EPS:
                     optimal_pruning += 1
                     total_pruned += 1
                     continue
@@ -213,8 +212,9 @@ def generate_routes(instance: str, model: Model):
     
     Z = build_and_optimize()
     end_time = time.perf_counter()
-
+    
     if VEHICLE_CAPACITY:
+        
         print("**********************************************")
         print("CHECKING CAPACITY VIOLATIONS")
         k = 1
@@ -281,6 +281,10 @@ def generate_routes(instance: str, model: Model):
 
 
 def main(argv=None):
+    global VEHICLE_CAPACITY
+    if os.environ.get("ROUTE_GEN_CAP") == "1":
+        VEHICLE_CAPACITY = 1
+
     path, _ = parse_instance_argv(argv, default_filename="l_4_25_4.txt")
     model = Model("MPDTW")
     generate_routes(str(path), model)

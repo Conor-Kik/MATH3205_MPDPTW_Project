@@ -1,10 +1,11 @@
-import os, sys, importlib
+import os
+import sys
+import importlib
 from typing import Dict
 
 # Ensure src/ is importable
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
 
-# Registry: map method -> "module.path:callable"
 REGISTRY: Dict[str, str] = {
     "two_index": "mpdptw.methods.two_index.MPDTW_Solver_Two:main",
     "three_index": "mpdptw.methods.three_index.MPDTW_Solver_Three:main",
@@ -13,8 +14,8 @@ REGISTRY: Dict[str, str] = {
     "col_gen_mt": "mpdptw.methods.col_generation.multi_thread_route_generation:main",
 }
 
+
 def load_entry(entry: str):
-    """Load 'package.module:func' and return the func."""
     module_path, func_name = entry.split(":")
     mod = importlib.import_module(module_path)
     try:
@@ -23,10 +24,10 @@ def load_entry(entry: str):
         raise SystemExit(f"Callable '{func_name}' not found in {module_path}") from e
     return func
 
+
 def main():
-    # Expect at least <method> <instance_file>
     if len(sys.argv) < 3 or sys.argv[1] in {"-h", "--help"}:
-        print("Usage: python cli.py <method> <instance_filename> [solver-args...]")
+        print("Usage: python cli.py <method> <instance_filename> [solver-args...] [--cap]")
         print("\nAvailable methods:")
         for m in REGISTRY.keys():
             print(f"  {m}")
@@ -37,19 +38,21 @@ def main():
         print(f"Unknown method '{method}'. Known: {', '.join(REGISTRY.keys())}")
         sys.exit(2)
 
-    # Everything after <method> is passed to the solver
     solver_argv = sys.argv[2:]
 
-    # Special handling: if method is col_gen and --mt is present, switch to multithreaded
+    # Handle --mt (multi-thread)
     if method == "col_gen" and "--mt" in solver_argv:
-        solver_argv.remove("--mt")  # don't forward flag to solver
+        solver_argv.remove("--mt")
         method = "col_gen_mt"
 
-    entry = REGISTRY[method]
-    func = load_entry(entry)
+    # --- New: handle --cap flag for route generation ---
+    if method in {"col_gen", "col_gen_mt"} and "--cap" in solver_argv:
+        solver_argv.remove("--cap")  # remove flag so solver doesn’t choke
+        os.environ["ROUTE_GEN_CAP"] = "1"  # mark it via env var
 
-    # Call the solver's main, forwarding its argv
+    func = load_entry(REGISTRY[method])
     func(solver_argv)
+
 
 if __name__ == "__main__":
     main()

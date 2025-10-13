@@ -1,5 +1,6 @@
 
 from math import comb
+import os
 from gurobipy import *
 from mpdptw.common.cli import parse_instance_argv
 from mpdptw.common.parsers import build_milp_data
@@ -13,8 +14,7 @@ import psutil
 
 # ---------------------------- Configuration Flags ---------------------------- #
 VEHICLE_CAPACITY = 0 # whether to enforce capacity feasibility via re-run
-COL_GEN_OUTPUT = 0    # Whether to show solver output of subproblem
-PRINT_ROUTES = 0      # whether to print selected routes after optimization
+PRINT_ROUTES = 1     # whether to print selected routes after optimization
 
 
 # ----------------------- Worker Initialization for Gurobi -------------------- #
@@ -112,8 +112,8 @@ def generate_routes(instance: str, model: Model):
     - Parallelization kicks in for large candidate sets.
     - Function prints summary stats and (optionally) chosen routes.
     """
-    if not PRINT_ROUTES:
-        model.setParam("OutputFlag", 0)
+
+    model.setParam("OutputFlag", 0)
     path = Path(instance)
     filename = path.name
     Time_Window = not filename.startswith("w")  # "w..." instances disable TW
@@ -366,7 +366,6 @@ def generate_routes(instance: str, model: Model):
                             print(f"Removed superset {sup}")
 
                     changed = True
-
             if not changed:
                 print("ALL ROUTES MEET CAPACITY REQUIREMENTS")
                 print("**********************************************")
@@ -382,7 +381,7 @@ def generate_routes(instance: str, model: Model):
             else:
                 print("Requests:", list(p), "Cost:", round(costs[p], 2))
 
-    print("**********************************************")
+    print("\n**********************************************")
     print(f"Column and Master runtime: {end_time - start_time:.2f}{f", Capacity Runtime: {cap_end_time-cap_start_time:.2f}" if VEHICLE_CAPACITY and k >= 2 else ''}")
     if VEHICLE_CAPACITY:
         print(f"Uncapacitated Obj Value: {original_obj:.2f}")
@@ -393,10 +392,14 @@ def generate_routes(instance: str, model: Model):
 
 # ------------------------------------ CLI ----------------------------------- #
 def main(argv=None):
+    global VEHICLE_CAPACITY
+    if os.environ.get("ROUTE_GEN_CAP") == "1":
+        VEHICLE_CAPACITY = 1
 
     path, _ = parse_instance_argv(argv, default_filename="l_4_25_4.txt")
     model = Model("MPDTW")
     generate_routes(str(path), model)
+
 
 
 if __name__ == "__main__":
