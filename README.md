@@ -50,6 +50,7 @@ Currently implemented methods include:
 - `arf` → Asymmetric representatives formulation  
 - `col_gen` → Column Generation approach  
   - Add `--mt` after the instance filename to use the **multi-threaded column generation** implementation.  
+  - Add `--cap` after the instance filename to use the **capacitated constraints**
 
 Each method has its own subdirectory under `src/mpdptw/methods/`.
 
