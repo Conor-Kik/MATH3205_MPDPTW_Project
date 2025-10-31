@@ -18,7 +18,7 @@ MATH3205_MPDPTW_Project/
 │               └── <Approach>.py
 │
 ├── mpdtw_instances_2019/           # Benchmark instance files (.txt)
-├── docs/                           # Project report, LaTeX documentation, papers used
+├── docs/                           # Project report and results
 ├── cli.py                          # CLI entrypoint
 └── README.txt                      # This file
 ```
@@ -63,14 +63,8 @@ python cli.py two_index l_4_25_1.txt
 python cli.py three_index l_4_35_2.txt
 python cli.py arf n_4_50_3.txt
 python cli.py col_gen w_8_100_4.txt
-python cli.py col_gen w_8_100_4.txt --mt   # Multi-threaded column generation
+python cli.py col_gen w_8_100_4.txt --mt --cap   # Multi-threaded column generation with cap constraints
 ```
-
----
-
-## Documentation
-
-- All project reports, LaTeX sources, and reference papers are stored in the `docs/` folder.  
 
 ---
 
